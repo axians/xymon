@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Security.Policy;
 using System.Text;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
@@ -37,6 +39,11 @@ namespace bbhostparser
             {
                 sb.AppendLine(string.Format("page\t{0}\t{1}", p.xymon_id, p.name));
 
+                foreach (var n in p.nodes)
+                {
+                    sb.AppendLine(string.Format("{0}\t{1}\t\t# {2}", n.ip_number, n.name, n.xymon_settings));
+                }
+
                 foreach (var g in p.groups)
                 {
                     sb.AppendLine(string.Format("{0}\t{1}\t{2}", g.group_type, g.xymon_settings, g.name));
@@ -48,9 +55,17 @@ namespace bbhostparser
                     sb.AppendLine();
                 }
 
+
+
                 foreach (var sp in p.subpages)
                 {
                     sb.AppendLine(string.Format("subpage\t{0}\t{1}", sp.xymon_id, sp.name));
+
+                    foreach (var n in sp.nodes)
+                    {
+                        sb.AppendLine(string.Format("{0}\t{1}\t\t# {2}", n.ip_number, n.name, n.xymon_settings));
+                    }
+
                     foreach (var g in sp.groups)
                     {
                         sb.AppendLine(string.Format("{0}\t{1}\t{2}", g.group_type, g.xymon_settings, g.name));
@@ -77,9 +92,13 @@ namespace bbhostparser
 
             var page_possitions = FindAllThethings(bbking, "page");
             var subpage_possitions = FindAllThethings(bbking, "subpage");
+            var group_with_space_possitions = FindAllThethings(bbking, "group ");
+            var group_with_tab_possitions = FindAllThethings(bbking, "group\t");
             var group_compress_possitions = FindAllThethings(bbking, "group-compress");
             var group_except_possitions = FindAllThethings(bbking, "group-except");
             var node_possitions = FindAllTheNodes(bbking);
+
+            var group_possitions = group_with_space_possitions.Union(group_with_tab_possitions).ToList();
 
             foreach (var p in page_possitions)
             {
@@ -93,6 +112,25 @@ namespace bbhostparser
 
                 list_of_pages.Single(x => x.row_id == parent_pos).subpages.Add(subp);
             }
+
+            foreach (var g in group_possitions)
+            {
+
+                var parent_pos = (FindParent(page_possitions.Union(subpage_possitions), g));
+                var gr = GetGroupByRowNumber(bbking, g);
+                Trace.WriteLine(gr.name);
+                var p = list_of_pages.SingleOrDefault(x => x.row_id == parent_pos);
+                if (p != null)
+                {
+                    p.groups.Add(gr);
+                }
+                else
+                {
+                    p = list_of_pages.FirstOrDefault(y => y.subpages.FirstOrDefault(z => z.row_id == parent_pos) != null);
+                    p.subpages.First(x => x.row_id == parent_pos).groups.Add(gr);
+                }
+            }
+            
 
             foreach (var g in group_compress_possitions)
             {
@@ -131,24 +169,25 @@ namespace bbhostparser
 
             foreach (var possition in node_possitions)
             {
-                var parent_pos = (FindParent(group_compress_possitions.Union(group_except_possitions), possition));
+                var parent_pos = FindParent(group_compress_possitions
+                    .Union(group_except_possitions)
+                    .Union(group_possitions)
+                    .Union(page_possitions)
+                    .Union(subpage_possitions)
+                    , possition);
                 var n = GetNodeByRowNumber(bbking, possition);
 
-                var z = list_of_pages
-                    .SelectMany(p => p.subpages)
-                    .SelectMany(s => s.groups)
-                    .Where(g => g.row_id == parent_pos)
-                    .ToList();
 
-                if (z.Count > 0)
-                {
-                    z.First().nodes.Add(n);
-                }
-                else
+                //parent is a group
+                if (group_possitions.Union(group_compress_possitions)
+                    .Union(group_except_possitions)
+                    .Contains(parent_pos))
                 {
 
-                    z = list_of_pages
-                        .SelectMany(p => p.groups)
+
+                    var z = list_of_pages
+                        .SelectMany(p => p.subpages)
+                        .SelectMany(s => s.groups)
                         .Where(g => g.row_id == parent_pos)
                         .ToList();
 
@@ -156,7 +195,39 @@ namespace bbhostparser
                     {
                         z.First().nodes.Add(n);
                     }
+                    else
+                    {
 
+                        z = list_of_pages
+                            .SelectMany(p => p.groups)
+                            .Where(g => g.row_id == parent_pos)
+                            .ToList();
+
+                        if (z.Count > 0)
+                        {
+                            z.First().nodes.Add(n);
+                        }
+
+                    }
+                }
+                else //parent is either a page or subpage
+                {
+                    var z = list_of_pages.FirstOrDefault(x => x.row_id == parent_pos);
+                    if (z != null)
+                    {
+                        z.nodes.Add(n);
+                    }
+                    else
+                    {
+                        var s = list_of_pages
+                            .SelectMany(p => p.subpages)
+                            .Where(sp => sp.row_id == parent_pos).ToList();
+
+                        if (s.Count > 0)
+                        {
+                            s.First().nodes.Add(n);
+                        }
+                    }
                 }
             }
 
@@ -189,6 +260,8 @@ namespace bbhostparser
             {
                 if (!lines[i].StartsWith("page") &&
                     !lines[i].StartsWith("subpage") &&
+                    !lines[i].StartsWith("group ") &&
+                    !lines[i].StartsWith("group\t") &&
                     !lines[i].StartsWith("group-except") &&
                     !lines[i].StartsWith("group-compress") &&
                     !lines[i].StartsWith("#") &&
@@ -230,6 +303,24 @@ namespace bbhostparser
                 name = FlattenStringArray(line_components, 2).Replace("page", string.Empty)
             };
         }
+
+        private static group GetGroupByRowNumber(IList<string> lines, int row_number)
+        {
+            var line = lines[row_number];
+            var line_components = line.Split(" ".ToCharArray());
+
+            if (line_components.Length == 1)
+                line_components = line.Split("\t".ToCharArray());
+
+            return new group()
+            {
+                id = Guid.NewGuid().ToString(),
+                row_id = row_number,
+                name = FlattenStringArray(line_components, 1),
+                group_type = "group"
+            };
+        }
+
 
         private static group GetGroupCompressByRowNumber(IList<string> lines, int row_number)
         {

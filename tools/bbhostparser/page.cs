@@ -8,12 +8,14 @@ namespace bbhostparser
         {
             groups = new List<group>();
             subpages = new List<subpage>();
+            nodes = new List<node>();
         }
 
         public string id { get; set; }
         public int row_id { get; set; }
         public string xymon_id { get; set; }
         public string name { get; set; }
+        public IList<node> nodes { get; set; }
         public IList<group> groups { get; set; }
         public IList<subpage> subpages { get; set; }
     }
@@ -23,12 +25,14 @@ namespace bbhostparser
         public subpage()
         {
             groups = new List<group>();
+            nodes = new List<node>();
         }
 
         public string id { get; set; }
         public int row_id { get; set; }
         public string xymon_id { get; set; }
         public string name { get; set; }
+        public IList<node> nodes { get; set; }
         public IList<group> groups { get; set; }
     }
 
