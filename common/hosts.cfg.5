@@ -970,6 +970,14 @@ key, in the $XYMONHOME/certs/ directory. The URL is then given as
 The "CERT:" part is literal - i.e. you write C-E-R-T-colon
 and then the filename of the PEM-formatted certificate.
 .br
+If a
+.I ~/.netrc
+entry also exists for the same host, its username/password will
+additionally be sent as an HTTP Basic Authentication header alongside
+the client certificate - so a test can use both the certificate (for the
+TLS handshake) and a netrc-based username/password (for the HTTP request)
+at the same time.
+.br
 A PEM-formatted certificate file can be generated based on
 certificates stored in Microsoft Internet Explorer and
 OpenSSL. Do as follows:
