@@ -496,31 +496,29 @@ void add_http_test(testitem_t *t)
 		int httpver_pinned = 0;
 
 		if (httptest->weburl.desturl->schemeopts) {
-			char *opts = httptest->weburl.desturl->schemeopts;
-
 			/*
 			 * "h2" must be matched exactly and before the single-character
 			 * option tests below, otherwise the "h" (HIGH ciphers) and "2"
 			 * (SSLv2) substrings would match it by accident.
 			 */
-			if (strcmp(opts, "h2") == 0) {
+			if (strcmp(httptest->weburl.desturl->schemeopts, "h2") == 0) {
 				/* httpsh2:// - require HTTP/2 (offer only "h2" via ALPN) */
 				sslopt_alpns = "h2";
 			}
 			else {
-				if      (strstr(opts, "3"))      sslopt_version = SSLVERSION_V3;
-				else if (strstr(opts, "2"))      sslopt_version = SSLVERSION_V2;
-				else if (strstr(opts, "t"))      sslopt_version = SSLVERSION_TLS10;
-				else if (strstr(opts, "a"))      sslopt_version = SSLVERSION_TLS10;
-				else if (strstr(opts, "b"))      sslopt_version = SSLVERSION_TLS11;
-				else if (strstr(opts, "c"))      sslopt_version = SSLVERSION_TLS12;
-				else if (strstr(opts, "d"))      sslopt_version = SSLVERSION_TLS13;
+				if      (strstr(httptest->weburl.desturl->schemeopts, "3"))      sslopt_version = SSLVERSION_V3;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "2"))      sslopt_version = SSLVERSION_V2;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "t"))      sslopt_version = SSLVERSION_TLS10;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "a"))      sslopt_version = SSLVERSION_TLS10;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "b"))      sslopt_version = SSLVERSION_TLS11;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "c"))      sslopt_version = SSLVERSION_TLS12;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "d"))      sslopt_version = SSLVERSION_TLS13;
 
-				if      (strstr(opts, "h"))      sslopt_ciphers = ciphershigh;
-				else if (strstr(opts, "m"))      sslopt_ciphers = ciphersmedium;
+				if      (strstr(httptest->weburl.desturl->schemeopts, "h"))      sslopt_ciphers = ciphershigh;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "m"))      sslopt_ciphers = ciphersmedium;
 
-				if      (strstr(opts, "10"))     { httpversion = HTTPVER_10; httpver_pinned = 1; }
-				else if (strstr(opts, "11"))     { httpversion = HTTPVER_11; httpver_pinned = 1; }
+				if      (strstr(httptest->weburl.desturl->schemeopts, "10"))     { httpversion = HTTPVER_10; httpver_pinned = 1; }
+				else if (strstr(httptest->weburl.desturl->schemeopts, "11"))     { httpversion = HTTPVER_11; httpver_pinned = 1; }
 			}
 		}
 
