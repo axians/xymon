@@ -1,0 +1,11 @@
+include Makefile.$(OS)
+include Makefile.rules
+
+test-compile:
+	@$(CC) $(CFLAGS) $(NGHTTP2INC) -o test-nghttp2.o -c test-nghttp2.c
+
+test-link:
+	@$(CC) $(CFLAGS) $(NGHTTP2LIB) -o test-nghttp2 test-nghttp2.o -lnghttp2 && ./test-nghttp2
+
+nghttp2-clean:
+	@rm -f test-nghttp2.o test-nghttp2
