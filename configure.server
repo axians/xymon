@@ -25,6 +25,8 @@ do
      --ldaplib DIRECTORY      : Specify location of OpenLDAP libraries
      --caresinclude DIRECTORY : Specify location of C-ARES include files
      --careslib DIRECTORY     : Specify location of C-ARES libraries
+     --nghttp2include DIRECTORY : Specify location of nghttp2 include files
+     --nghttp2lib DIRECTORY   : Specify location of nghttp2 libraries
      --fping FILENAME         : Specify location of the Fping program
 
   The script will search a number of standard directories for
@@ -66,6 +68,12 @@ EOF
 	  "--careslib")
 	  	USERCARESLIB="$1"; shift
 		;;
+	  "--nghttp2include")
+	  	USERNGHTTP2INC="$1"; shift
+		;;
+	  "--nghttp2lib")
+	  	USERNGHTTP2LIB="$1"; shift
+		;;
 	  "--fping")
 	  	USERFPING="$1"; shift
 		;;
@@ -100,6 +108,8 @@ echo ""; echo ""
 . build/pcre.sh
 echo ""; echo ""
 . build/c-ares.sh
+echo ""; echo ""
+. build/nghttp2.sh
 echo ""; echo ""
 
 . build/rrd.sh
@@ -469,6 +479,27 @@ then
     fi
 else
     echo "SYSTEMCARES = no"              >>Makefile
+fi
+echo ""                                  >>Makefile
+
+echo "# nghttp2 (HTTP/2) settings"       >>Makefile
+if test "$NGHTTP2OK" = "YES"
+then
+    echo "DONGHTTP2 = yes"               >>Makefile
+    echo "NGHTTP2FLAGS = -DHAVE_NGHTTP2" >>Makefile
+    if test "$NGHTTP2INCDIR" != ""; then
+	echo "NGHTTP2INCDIR = -I$NGHTTP2INCDIR" >>Makefile
+    fi
+    if test "$NGHTTP2LIBDIR" != ""; then
+	echo "NGHTTP2LIBS = -L$NGHTTP2LIBDIR -lnghttp2" >>Makefile
+	echo "RPATHVAL += ${NGHTTP2LIBDIR}"  >>Makefile
+    else
+	echo "NGHTTP2LIBS = -lnghttp2"       >>Makefile
+    fi
+else
+    echo "DONGHTTP2 = no"                >>Makefile
+    echo "NGHTTP2FLAGS ="                >>Makefile
+    echo "NGHTTP2LIBS ="                 >>Makefile
 fi
 echo ""                                  >>Makefile
 
