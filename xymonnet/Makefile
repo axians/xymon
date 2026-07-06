@@ -84,8 +84,8 @@ beastat.o: beastat.c
 	$(CC) $(CFLAGS) $(PCREINCDIR) -c -o $@ beastat.c
 
 
-contest: contest.c httptest.o dns.o dns2.o httpcookies.o $(XYMONCOMMLIB) $(XYMONTIMELIB)
-	$(CC) $(CFLAGS) -o contest -I../include $(CARESINC) -DSTANDALONE contest.c httptest.o dns.o dns2.o httpcookies.o $(CARESLIBS) $(XYMONCOMMLIBS) $(XYMONTIMELIBS)
+contest: contest.c httptest.o http2.o dns.o dns2.o httpcookies.o $(XYMONCOMMLIB) $(XYMONTIMELIB)
+	$(CC) $(CFLAGS) $(SSLFLAGS) $(NGHTTP2FLAGS) -o contest -I../include $(CARESINC) $(NGHTTP2INCDIR) -DSTANDALONE contest.c httptest.o http2.o dns.o dns2.o httpcookies.o $(CARESLIBS) $(NGHTTP2LIBS) $(XYMONCOMMLIBS) $(XYMONTIMELIBS)
 
 
 xymon-snmpcollect: xymon-snmpcollect.o $(XYMONCOMMLIB) $(XYMONTIMELIB)
