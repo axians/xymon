@@ -1027,12 +1027,36 @@ one or more "dialect names" to the URL scheme, i.e. the
 * "10", e.g. http10://www.sample.com/ : use HTTP 1.0
 .br
 * "11", e.g. http11://www.sample.com/ : use HTTP 1.1
+.br
+* "h2", e.g. httpsh2://www.sample.com/ : require HTTP/2 (see below)
 
 These can be combined where it makes sense, e.g to force
-TLS1.2 and HTTP 1.0 you would use "httpsc10".
+TLS1.2 and HTTP 1.0 you would use "httpsc10". The "h2" dialect is an
+exception - it is matched on its own and cannot be combined with the
+other options.
 
 Note that SSLv2 support is disabled in all current OpenSSL releases.
 TLS version-specific scheme testing requires OpenSSL 1.0.1 or higher.
+
+.IP "HTTP/2"
+If xymonnet was built with the nghttp2 library, HTTP/2 is negotiated
+automatically for every ordinary "https://" test: xymonnet offers both
+HTTP/2 and HTTP/1.1 during the TLS handshake (via ALPN) and uses
+whichever the server selects. Servers that do not support HTTP/2 - or
+do not support ALPN at all - continue to be tested over HTTP/1.1 exactly
+as before, so no configuration change is needed.
+
+To \fBrequire\fR HTTP/2, use the "httpsh2://" scheme. This offers only
+HTTP/2 during negotiation, and the test goes red if the server will not
+speak HTTP/2. Use this when you specifically want to monitor that a site
+is serving HTTP/2.
+
+To pin a test to HTTP/1.x regardless of HTTP/2 availability, use the
+"https11://" (or "https10://") scheme as described above.
+
+HTTP/2 is only used for direct "https://" tests; tests routed through a
+proxy always use HTTP/1.1. If xymonnet was built without nghttp2, HTTP/2
+is never offered and an "httpsh2://" test reports an error.
 
 .IP "Testing sites by IP-address"
 xymonnet ignores the "testip" tag normally used to force a 
