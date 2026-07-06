@@ -136,6 +136,10 @@ typedef struct tcptest_t {
 	f_callback_data datacallback;
 	f_callback_final finalcallback;
 
+	/* For HTTP/2 (when ALPN negotiated "h2") */
+	int http2;			/* Set when the connection speaks HTTP/2 */
+	void *h2session;		/* Opaque h2conn_t*, managed by http2.c */
+
 	struct tcptest_t *next;
 } tcptest_t;
 
@@ -148,6 +152,7 @@ typedef struct tcptest_t {
 #define HTTPVER_ANY 0
 #define HTTPVER_10  1
 #define HTTPVER_11  2
+#define HTTPVER_2   3
 
 #define CHUNK_NOTCHUNKED 0
 #define CHUNK_INIT       1
