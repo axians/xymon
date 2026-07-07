@@ -325,7 +325,14 @@ void generate_html_log(char *hostname, char *displayname, char *service, char *i
 	}
 
 	if (disabletime != 0) {
-		fprintf(output, "<TR><TD ALIGN=LEFT><H3>Disabled until %s</H3></TD></TR>\n", 
+		if (disabletime < -1) {
+			/* Until OK, but at latest until the (negated) deadline */
+			time_t deadline = -disabletime;
+
+			fprintf(output, "<TR><TD ALIGN=LEFT><H3>Disabled until OK (max %s)</H3></TD></TR>\n",
+				ctime(&deadline));
+		}
+		else fprintf(output, "<TR><TD ALIGN=LEFT><H3>Disabled until %s</H3></TD></TR>\n",
 			(disabletime == -1 ? "OK" : ctime(&disabletime)));
 		fprintf(output, "<TR><TD ALIGN=LEFT><PRE>%s</PRE></TD></TR>\n", htmlquoted(dismsg));
 		fprintf(output, "<TR><TD ALIGN=LEFT><BR><HR>Current status message follows:<HR><BR></TD></TR>\n");

@@ -146,6 +146,15 @@ in seconds/minutes/hours/days respectively.
 .BR
 To disable a test until it becomes OK, use "\-1" as the DURATION.
 .BR
+To disable a test until it becomes OK - but at latest until a deadline -
+use a "\-" followed by a normal duration, e.g. "\-2h" to keep the test
+disabled until it goes OK or 2 hours have passed, whichever comes first.
+.BR
+Note that the Xymon server may enforce a maximum duration on all
+disables (the MAXDISABLEDURATION setting in xymonserver.cfg, 30 days
+by default); requests beyond the maximum are silently shortened to it,
+and a plain "\-1" is converted to "until OK, at latest the maximum".
+.BR
 To disable all tests for a host, use an asterisk "*" for TESTNAME.
 
 .IP "enable HOSTNAME.TESTNAME"
@@ -220,7 +229,10 @@ Unix timestamp when the log message is no longer valid (it goes purple at this t
 Either \-1 or Unix timestamp when an active acknowledgement expires.
 .sp
 .BR disabletime
-Either \-1 or Unix timestamp when the status is no longer disabled.
+Either \-1 (disabled until OK), a Unix timestamp when the status is no
+longer disabled, or a negative Unix timestamp (below \-1) meaning the
+status is disabled until OK but re-enables at the negated timestamp at
+the latest.
 .sp
 .BR sender
 IP address where the status was received from.
@@ -344,7 +356,10 @@ Unix timestamp when the log message is no longer valid (it goes purple at this t
 Either \-1 or Unix timestamp when an active acknowledgement expires.
 .sp
 .BR disabletime
-Either \-1 or Unix timestamp when the status is no longer disabled.
+Either \-1 (disabled until OK), a Unix timestamp when the status is no
+longer disabled, or a negative Unix timestamp (below \-1) meaning the
+status is disabled until OK but re-enables at the negated timestamp at
+the latest.
 .sp
 .BR sender
 IP address where the status was received from.
