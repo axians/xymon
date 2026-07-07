@@ -5061,7 +5061,7 @@ void load_checkpoint(char *fn)
 		if (strcmp(testname, xgetenv("CLIENTCOLUMN")) == 0) continue;
 
 		/* Rename the now-forgotten internal statuses */
-		if (strcmp(hostname, getenv("MACHINEDOTS")) == 0) {
+		if (getenv("MACHINEDOTS") && (strcmp(hostname, getenv("MACHINEDOTS")) == 0)) {
 			if (strcmp(testname, "bbgen") == 0) testname = "xymongen";
 			else if (strcmp(testname, "bbtest") == 0) testname = "xymonnet";
 			else if (strcmp(testname, "hobbitd") == 0) testname = "xymond";
