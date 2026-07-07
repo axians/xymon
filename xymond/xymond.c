@@ -59,6 +59,7 @@ static char rcsid[] = "$Id$";
 #include "libxymon.h"
 
 #define DISABLED_UNTIL_OK -1
+#define TIMESTR_RESET -999	/* timestr() arg: reset its static buffer index. Cannot be a real negated deadline (epoch 999 = 1970). */
 
 /*
  * The absolute maximum size we'll grow our buffers to accommodate an incoming message.
@@ -194,6 +195,7 @@ int      allow_downloads = 1;
 int	 defaultvalidity = 30;	/* Minutes */
 int	 ackeachcolor = 0;
 int	 defaultcookietime = 86400;	/* 1 day */
+int	 maxdisabledur = 30*24*60;	/* Cap on any disable, in minutes. 0 = unlimited. Set via MAXDISABLEDURATION */
 
 #define NOTALK 0
 #define RECEIVING 1
@@ -1541,8 +1543,14 @@ void handle_status(unsigned char *msg, char *sender, char *hostname, char *testn
 		log->flapping = 0;
 	}
 
-	if (log->enabletime == DISABLED_UNTIL_OK) {
-		/* The test is disabled until we get an OK status */
+	if ((log->enabletime == DISABLED_UNTIL_OK) ||
+	    ((log->enabletime < DISABLED_UNTIL_OK) && (-log->enabletime > now))) {
+		/*
+		 * The test is disabled until we get an OK status. For the bounded
+		 * variant (enabletime < -1, "until OK at latest TIME"), the deadline
+		 * has not been reached yet - the deadline-passed case is handled by
+		 * the expiry branch below.
+		 */
 		if ((newcolor != COL_BLUE) && (decide_alertstate(newcolor) == A_OK)) {
 			/* It's OK now - clear the disable status */
 			log->enabletime = 0;
@@ -1614,6 +1622,10 @@ void handle_status(unsigned char *msg, char *sender, char *hostname, char *testn
 		if (log->acktime    && (log->acktime > log->validtime))    log->validtime = log->acktime;
 		if (log->enabletime) {
 			if (log->enabletime == DISABLED_UNTIL_OK) log->validtime = INT_MAX;
+			else if (log->enabletime < DISABLED_UNTIL_OK) {
+				/* Until-OK with a deadline: valid until the deadline at least */
+				if (-log->enabletime > log->validtime) log->validtime = -log->enabletime;
+			}
 			else if (log->enabletime > log->validtime) log->validtime = log->enabletime;
 		}
 		else if ((newcolor == COL_PURPLE) && (xmh_item(hinfo, XMH_DOWNTIME) != NULL) ) {
@@ -2061,17 +2073,50 @@ void handle_enadis(int enabled, conn_t *msg, char *sender)
 
 	if (!enabled) {
 		if (durstr) {
+			time_t now = getcurrenttime(NULL);
+
 			if (strcmp(durstr, "-1") == 0) {
 				expires = DISABLED_UNTIL_OK;
+			}
+			else if (*durstr == '-') {
+				/*
+				 * "-DURATION": Disabled until OK, but at latest until a
+				 * deadline. Encoded as the negative of the deadline time,
+				 * so it passes unchanged through checkpoints and channels.
+				 */
+				int expirerounding;
+				time_t deadline = 60*durationvalue(durstr+1) + now;
+
+				/* If deadline is not on the ":00" seconds, bump it to next whole minute */
+				expirerounding = (60 - (deadline % 60));
+				if (expirerounding < 60) deadline += expirerounding;
+				expires = -deadline;
 			}
 			else {
 				int expirerounding;
 
-				expires = 60*durationvalue(durstr) + getcurrenttime(NULL);
+				expires = 60*durationvalue(durstr) + now;
 
 				/* If "expires" is not on the ":00" seconds, bump expire time to next whole minute */
 				expirerounding = (60 - (expires % 60));
 				if (expirerounding < 60) expires += expirerounding;
+			}
+
+			/*
+			 * Enforce the server-wide maximum disable duration (MAXDISABLEDURATION).
+			 * An unbounded "until OK" becomes "until OK, at latest now+max", and
+			 * longer time-based or bounded requests are clamped to the cap.
+			 */
+			if (maxdisabledur > 0) {
+				int expirerounding;
+				time_t capdeadline = now + 60*maxdisabledur;
+
+				expirerounding = (60 - (capdeadline % 60));
+				if (expirerounding < 60) capdeadline += expirerounding;
+
+				if (expires == DISABLED_UNTIL_OK) expires = -capdeadline;
+				else if ((expires < DISABLED_UNTIL_OK) && (-expires > capdeadline)) expires = -capdeadline;
+				else if ((expires > 0) && (expires > capdeadline)) expires = capdeadline;
 			}
 
 			txtstart = msg->buf + (durstr + strlen(durstr) - firstline);
@@ -2153,7 +2198,8 @@ void handle_enadis(int enabled, conn_t *msg, char *sender)
 		if (alltests) {
 			for (log = hwalk->logs; (log); log = log->next) {
 				log->enabletime = expires;
-				log->validtime = (expires == DISABLED_UNTIL_OK) ? INT_MAX : log->validtime;
+				if (expires == DISABLED_UNTIL_OK) log->validtime = INT_MAX;
+				else if ((expires < DISABLED_UNTIL_OK) && (-expires > log->validtime)) log->validtime = -expires;
 				if (txtstart) {
 					if (log->dismsg) xfree(log->dismsg);
 					log->dismsg = strdup(txtstart);
@@ -2167,7 +2213,8 @@ void handle_enadis(int enabled, conn_t *msg, char *sender)
 			for (log = hwalk->logs; (log && (log->test != twalk)); log = log->next) ;
 			if (log) {
 				log->enabletime = expires;
-				log->validtime = (expires == DISABLED_UNTIL_OK) ? INT_MAX : log->validtime;
+				if (expires == DISABLED_UNTIL_OK) log->validtime = INT_MAX;
+				else if ((expires < DISABLED_UNTIL_OK) && (-expires > log->validtime)) log->validtime = -expires;
 				if (txtstart) {
 					if (log->dismsg) xfree(log->dismsg);
 					log->dismsg = strdup(txtstart);
@@ -2817,8 +2864,18 @@ char *timestr(time_t tstamp)
 	static int residx = -1;
 	char *p;
 
-	if (tstamp < DISABLED_UNTIL_OK) {
+	if (tstamp == TIMESTR_RESET) {
+		/* Reset the static buffer index - called between output records */
 		residx = -1;
+	}
+	else if (tstamp < DISABLED_UNTIL_OK) {
+		/* Until OK, but at latest until the (negated) deadline */
+		time_t deadline = -tstamp;
+
+		if (result[++residx] == NULL) result[residx] = (char *)malloc(45);
+		snprintf(result[residx], 45, "Until OK (max %s", ctime(&deadline));
+		p = strchr(result[residx], '\n'); if (p) *p = '\0';
+		strcat(result[residx], ")");
 	}
 	else if (tstamp == DISABLED_UNTIL_OK) {
 		return "Until OK";
@@ -2827,7 +2884,7 @@ char *timestr(time_t tstamp)
 		return "N/A";
 	}
 	else {
-		if (result[++residx] == NULL) result[residx] = (char *)malloc(30);
+		if (result[++residx] == NULL) result[residx] = (char *)malloc(45);
 		strcpy(result[residx], ctime(&tstamp));
 		p = strchr(result[residx], '\n'); if (p) *p = '\0';
 	}
@@ -3996,7 +4053,7 @@ void do_message(conn_t *msg, char *origin)
 				"  <DisableTime>", 	timestr(log->enabletime), 		"</DisableTime>\n",
 				"  <Sender>", 		(log->sender ? log->sender : "xymond"),	"</Sender>\n", 
 				NULL);
-			timestr(-999);
+			timestr(TIMESTR_RESET);
 
 			if (log->cookie && (log->cookieexpires > now))
 				addtobuffer_many(response, "  <Cookie>", log->cookie, "</Cookie>\n", NULL);
@@ -4214,7 +4271,7 @@ void do_message(conn_t *msg, char *origin)
 					"    <DisableTime>", timestr(lwalk->enabletime), "</DisableTime>\n",
 					"    <Sender>", (lwalk->sender ? lwalk->sender : "xymond"), "</Sender>\n",
 					NULL);
-				timestr(-999);
+				timestr(TIMESTR_RESET);
 
 				if (lwalk->cookie && (lwalk->cookieexpires > now))
 					addtobuffer_many(response, "    <Cookie>", lwalk->cookie, "</Cookie>\n", NULL);
@@ -4781,7 +4838,9 @@ void save_checkpoint(void)
 		hwalk = xtreeData(rbhosts, hosthandle);
 
 		for (lwalk = hwalk->logs; (lwalk); lwalk = lwalk->next) {
-			if (lwalk->dismsg && (lwalk->enabletime < now) && (lwalk->enabletime != DISABLED_UNTIL_OK)) {
+			if (lwalk->dismsg && (lwalk->enabletime < now) && (lwalk->enabletime != DISABLED_UNTIL_OK) &&
+			    ((lwalk->enabletime > DISABLED_UNTIL_OK) || (-lwalk->enabletime < now))) {
+				/* Expired time-based disable, or bounded until-OK whose deadline has passed */
 				xfree(lwalk->dismsg);
 				lwalk->dismsg = NULL;
 				lwalk->enabletime = 0;
@@ -5046,6 +5105,7 @@ void load_checkpoint(char *fn)
 		/* Fixup validtime in case of ack'ed or disabled tests */
 		if (validtime < acktime) validtime = acktime;
 		if (validtime < enabletime) validtime = enabletime;
+		if ((enabletime < DISABLED_UNTIL_OK) && (validtime < -enabletime)) validtime = -enabletime;
 
 		ltail->test = t;
 		ltail->host = hitem;
@@ -5062,6 +5122,7 @@ void load_checkpoint(char *fn)
 		ltail->validtime = validtime;
 		ltail->enabletime = enabletime;
 		if (ltail->enabletime == DISABLED_UNTIL_OK) ltail->validtime = INT_MAX;
+		else if ((ltail->enabletime < DISABLED_UNTIL_OK) && (ltail->validtime < -ltail->enabletime)) ltail->validtime = -ltail->enabletime;
 		ltail->acktime = acktime;
 		ltail->redstart = redstart;
 		ltail->yellowstart = yellowstart;
@@ -5483,6 +5544,16 @@ int main(int argc, char *argv[])
 	if (xgetenv("STATUSLIFETIME")) {
 		int n = atoi(xgetenv("STATUSLIFETIME"));
 		if (n > 0) defaultvalidity = n;
+	}
+
+	if (xgetenv("MAXDISABLEDURATION")) {
+		/*
+		 * Cap on how long any test can be disabled (durationvalue syntax).
+		 * "0" means unlimited, i.e. the pre-cap behavior incl. "until OK" forever.
+		 * When unset, the built-in default (43200 minutes = 30 days) applies.
+		 */
+		maxdisabledur = durationvalue(xgetenv("MAXDISABLEDURATION"));
+		if (maxdisabledur < 0) maxdisabledur = 0;
 	}
 
 	/* Make sure we load hosts.cfg file, and not via the network from ourselves */
