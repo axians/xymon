@@ -135,6 +135,12 @@ delay, list the status column in both \fBdelayred\fR and
 exception: the first report that arrives after the data gap takes
 effect immediately, without any delay.
 
+A host-specific \fBdelayred\fR normally replaces the default delays
+(from a ".default." host entry or the DELAYRED setting in
+xymonserver.cfg). If the value starts with a "+", e.g.
+\fBdelayred=+ntp:10\fR, the host's entries are added to the defaults
+instead. Host entries win when both list the same status column.
+
 .IP delayyellow=STATUSCOLUMN:DELAY[,STATUSCOLUMN:DELAY...]
 Same as \fBdelayred\fR, but defers the change to a yellow status.
 

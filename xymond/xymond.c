@@ -1356,17 +1356,18 @@ xymond_log_t *find_cookie(char *cookie)
 
 static int changedelay(void *hinfo, int newcolor, char *testname, int currcolor)
 {
-	char *key, *tok, *dstr = NULL;
+	char *key, *tok, *dstr = NULL, *defdstr = NULL;
 	int keylen, result = 0;
 
 	/* Ignore any delays when we start with a purple status */
 	if (currcolor == COL_PURPLE) return 0;
 
 	switch (newcolor) {
-	  case COL_RED: dstr = xmh_item(hinfo, XMH_DELAYRED); if (!dstr) dstr = defaultreddelay; break;
-	  case COL_YELLOW: dstr = xmh_item(hinfo, XMH_DELAYYELLOW); if (!dstr) dstr = defaultyellowdelay; break;
+	  case COL_RED: dstr = xmh_item(hinfo, XMH_DELAYRED); defdstr = defaultreddelay; break;
+	  case COL_YELLOW: dstr = xmh_item(hinfo, XMH_DELAYYELLOW); defdstr = defaultyellowdelay; break;
 	  default: break;
 	}
+	if (!dstr) dstr = defdstr;
 
 	if (!dstr) return result;
 
@@ -1375,7 +1376,20 @@ static int changedelay(void *hinfo, int newcolor, char *testname, int currcolor)
 	key = (char *)malloc(keylen + 1);
 	sprintf(key, "%s:", testname);
 
-	dstr = strdup(dstr);
+	if (*dstr == '+') {
+		/*
+		 * Additive hosts.cfg value: append the DELAYRED/DELAYYELLOW default
+		 * list. Host entries come first, so they win for the same column.
+		 */
+		if (defdstr && *defdstr && (dstr != defdstr)) {
+			char *combined = (char *)malloc(strlen(dstr) + strlen(defdstr) + 2);
+
+			sprintf(combined, "%s,%s", dstr+1, defdstr);
+			dstr = combined;
+		}
+		else dstr = strdup(dstr+1);
+	}
+	else dstr = strdup(dstr);
 	tok = strtok(dstr, ",");
 	while (tok && (strncmp(key, tok, keylen) != 0)) tok = strtok(NULL, ",");
 	if (tok) result = 60*atoi(tok+keylen); /* Convert to seconds */

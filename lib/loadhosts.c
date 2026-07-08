@@ -242,6 +242,34 @@ static char *xmh_find_item(namelist_t *host, enum xmh_item_t item)
 		result = (host->elems[i] ? (host->elems[i] + 6) : NULL);
 	}
 
+	/*
+	 * Additive delayred/delayyellow: a value starting with "+" appends to the
+	 * .default. host's value instead of replacing it. Host entries come first,
+	 * so they take precedence for the same column. Only these two items - other
+	 * tags (the NOPROP* family) use "+" with a different meaning.
+	 */
+	if (result && (*result == '+') &&
+	    ((item == XMH_DELAYRED) || (item == XMH_DELAYYELLOW)) &&
+	    host->defaulthost && (strcasecmp(host->hostname, ".default.") != 0)) {
+		char *defval = xmh_find_item(host->defaulthost, item);
+
+		if (defval && *defval) {
+			static char *merged = NULL;
+			int defplus = (*defval == '+');
+
+			/*
+			 * If the .default. value is itself additive, hoist its "+" to the
+			 * front of the merged list so the DELAYRED/DELAYYELLOW environment
+			 * default still gets appended by the consumer.
+			 */
+			if (merged) xfree(merged);
+			merged = (char *)malloc(strlen(result) + strlen(defval) + 3);
+			sprintf(merged, "%s%s,%s", (defplus ? "+" : ""), result+1, defval+defplus);
+			return merged;
+		}
+		/* No default value to append - keep the "+" so the DELAYRED/DELAYYELLOW environment default can still merge */
+	}
+
 	if (result || !host->defaulthost || (strcasecmp(host->hostname, ".default.") == 0)) {
 		if (xmh_item_isflag[item]) {
 			return (result ? xmh_item_key[item] : NULL);
