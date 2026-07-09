@@ -157,8 +157,10 @@ commas. If all columns are given as "!COLUMNNAME", then all status
 columns except those listed will cause the client data to be sent.
 
 .IP "\-\-status\-senders=IP[/MASK][,IP/MASK]"
-Controls which hosts may send "status", "combo", "config" and "query"
-commands to xymond.
+Controls which hosts may send "status", "combo" and "query"
+commands to xymond. This also controls the "config" command, unless
+\-\-config\-senders has been used to switch "config" and "query" to
+their own, separate access list (see below).
 
 By default, any host can send status-updates. If this option is used, 
 then status-updates are accepted only if they are sent by one of the 
@@ -212,6 +214,22 @@ commands are the "drop" and "rename" commands. Access to these should be
 restricted, since they provide an un-authenticated means of completely
 disabling monitoring of a host, and can be used to remove all traces of e.g.
 a system compromise from the Xymon monitor.
+
+\fBNote:\fR If messages are sent through a proxy, the IP-address restrictions
+are of little use, since the messages will appear to originate from the
+proxy server address. It is therefore strongly recommended that you do NOT
+include the address of a server running xymonproxy in the list of allowed addresses.
+
+.IP "\-\-config\-senders=IP[/MASK][,IP/MASK]"
+The "config" command lets a caller retrieve any file under the server's
+etc/ directory, and the "query" command lets a caller retrieve the
+current status of a single test. By default (this option unset), both
+are controlled by \-\-status\-senders, the same as "status"/"combo".
+
+Setting this option switches "config" and "query" to their own, separate
+access list: once set, only hosts listed here may send them, and
+\-\-status\-senders no longer applies to either command. Format of this
+option is as for the \-\-status\-senders option.
 
 \fBNote:\fR If messages are sent through a proxy, the IP-address restrictions
 are of little use, since the messages will appear to originate from the

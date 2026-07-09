@@ -184,6 +184,7 @@ void *rbsenders;
 sender_t *maintsenders = NULL;
 sender_t *statussenders = NULL;
 sender_t *adminsenders = NULL;
+sender_t *configsenders = NULL;
 sender_t *wwwsenders = NULL;
 sender_t *tracelist = NULL;
 int      traceall = 0;
@@ -3851,7 +3852,18 @@ void do_message(conn_t *msg, char *origin)
 	else if (strncmp(msg->buf, "config", 6) == 0) {
 		char *conffn, *p;
 
-		if (!oksender(statussenders, NULL, msg->addr.sin_addr, msg->buf)) goto done;
+		/* config-senders is a separate, opt-in access list for "config", "query".
+		 * Unset, both are gated by status-senders instead; once set,
+		 * status-senders no longer applies to either command. */
+		if (configsenders) {
+			if (!oksender(configsenders, NULL, msg->addr.sin_addr, NULL)) {
+				errprintf("Refused message from %s: %s\n", inet_ntoa(msg->addr.sin_addr), msg->buf);
+				goto done;
+			}
+		}
+		else if (!oksender(statussenders, NULL, msg->addr.sin_addr, msg->buf)) {
+			goto done;
+		}
 
 		p = msg->buf + 6; p += strspn(p, " \t");
 		p = strtok(p, " \t\r\n");
@@ -3886,7 +3898,17 @@ void do_message(conn_t *msg, char *origin)
 	}
 	else if (strncmp(msg->buf, "query ", 6) == 0) {
 		get_hts(msg->buf, sender, origin, &h, &t, NULL, &log, &color, NULL, NULL, 0, 0);
-		if (!oksender(statussenders, (h ? h->ip : NULL), msg->addr.sin_addr, msg->buf)) goto done;
+
+		/* Same config-senders opt-in gate as "config" - see comment there. */
+		if (configsenders) {
+			if (!oksender(configsenders, (h ? h->ip : NULL), msg->addr.sin_addr, NULL)) {
+				errprintf("Refused message from %s: %s\n", inet_ntoa(msg->addr.sin_addr), msg->buf);
+				goto done;
+			}
+		}
+		else if (!oksender(statussenders, (h ? h->ip : NULL), msg->addr.sin_addr, msg->buf)) {
+			goto done;
+		}
 
 		if (log) {
 			xfree(msg->buf);
@@ -5362,9 +5384,14 @@ int main(int argc, char *argv[])
 			statussenders = getsenderlist(p+1);
 		}
 		else if (argnmatch(argv[argi], "--admin-senders=")) {
-			/* Who is allowed to send us "drop", "rename", "config", "query" messages */
+			/* Who is allowed to send us "drop", "rename" messages */
 			char *p = strchr(argv[argi], '=');
 			adminsenders = getsenderlist(p+1);
+		}
+		else if (argnmatch(argv[argi], "--config-senders=")) {
+			/* Who is allowed to send us "config", "query" messages - opt-in */
+			char *p = strchr(argv[argi], '=');
+			configsenders = getsenderlist(p+1);
 		}
 		else if (argnmatch(argv[argi], "--www-senders=")) {
 			/* Who is allowed to send us "xymondboard", "xymondlog"  messages */
