@@ -38,6 +38,7 @@ static char rcsid[] = "$Id$";
 #include "xymonnet.h"
 #include "contest.h"
 #include "httptest.h"
+#include "http2.h"
 #include "dns.h"
 
 /* BSD uses RLIMIT_OFILE */
@@ -732,7 +733,31 @@ static void setup_ssl(tcptest_t *item)
 		return;
 	}
 
-	/* If we get this far, the SSL handshake has completed. So grab the certificate */
+	/* If we get this far, the SSL handshake has completed. */
+
+	/*
+	 * Check whether ALPN negotiated HTTP/2. If h2 was required (we offered
+	 * only "h2") but the server did not select it, fail the test.
+	 */
+	if (http2_available()) {
+		const unsigned char *alpn = NULL;
+		unsigned int alpnlen = 0;
+
+		SSL_get0_alpn_selected(item->ssldata, &alpn, &alpnlen);
+		if (alpn && (alpnlen == 2) && (memcmp(alpn, "h2", 2) == 0)) {
+			item->http2 = 1;
+		}
+		else if (item->ssloptions && item->ssloptions->alpns &&
+			 (strcmp(item->ssloptions->alpns, "h2") == 0)) {
+			errprintf("HTTP/2 required but not negotiated by %s on host %s\n",
+				  portinfo, inet_ntoa(item->addr.sin_addr));
+			item->errcode = CONTEST_ESSL;
+			item->sslrunning = 0; SSL_free(item->ssldata); SSL_CTX_free(item->sslctx);
+			return;
+		}
+	}
+
+	/* Grab the certificate */
 	peercert = SSL_get_peer_certificate(item->ssldata);
 	if (!peercert) {
 		errprintf("Cannot get peer certificate for %s on host %s\n",
@@ -1217,6 +1242,7 @@ restartselect:
 						item->errcode = CONTEST_ETIMEOUT;
 					}
 					get_totaltime(item, &timestamp);
+					http2_cleanup(item);
 					close(item->fd);
 					item->fd = -1;
 					activesockets--;
@@ -1280,9 +1306,37 @@ restartselect:
 						 *     OR if we need it to match the expect string in the servicedef.
 						 */
 
-						item->readpending = (do_talk && !item->silenttest && 
+						item->readpending = (do_talk && !item->silenttest &&
 							( (item->svcinfo->flags & TCP_GET_BANNER) || item->svcinfo->exptext ));
-						if (do_talk) {
+						if (do_talk && item->http2) {
+							/*
+							 * HTTP/2: hand the request to the nghttp2 shim
+							 * instead of writing the HTTP/1.1 text directly.
+							 * http2_start() sets up the session and submits
+							 * the request the first time through; senddata
+							 * flushes the framed output. When all output has
+							 * been sent we switch to read-mode.
+							 */
+							int s = 0;
+
+							if (item->h2session == NULL) {
+								if (http2_start(item) < 0) {
+									item->readpending = 0;
+									item->errcode = CONTEST_EIO;
+								}
+							}
+							if (item->h2session) {
+								s = http2_senddata(item);
+								if (s < 0) {
+									item->readpending = 0;
+									item->errcode = CONTEST_EIO;
+								}
+								else {
+									item->readpending = (s == 0);
+								}
+							}
+						}
+						else if (do_talk) {
 							if (item->telnetnegotiate && item->telnetbuflen) {
 								/*
 								 * Return the telnet negotiate data response
@@ -1298,7 +1352,7 @@ restartselect:
 							if (outbuf && outlen) {
 								/*
 								 * It may be that we cannot write all of the
-								 * data we want to. Tough ... 
+								 * data we want to. Tough ...
 								 */
 								res = socket_write(item, outbuf, outlen);
 								tcp_stats_written += res;
@@ -1330,6 +1384,7 @@ restartselect:
 								close(item->fd);
 								get_totaltime(item, &timestamp);
 								if (item->finalcallback) item->finalcallback(item->priv);
+							http2_cleanup(item);
 								item->fd = -1;
 								activesockets--;
 								pending--;
@@ -1362,7 +1417,16 @@ restartselect:
 						tcp_stats_read += res;
 						dbgprintf("read %d bytes from socket\n", res);
 
-						if ((res > 0) && item->datacallback) {
+						if ((res > 0) && item->http2) {
+							/*
+							 * HTTP/2: feed the bytes to the nghttp2 shim,
+							 * which reassembles the response and pushes it
+							 * through the datacallback when complete.
+							 */
+							int d = http2_recvdata(item, msgbuf, res);
+							datadone = (d != 0);	/* done on completion (1) or error (-1) */
+						}
+						else if ((res > 0) && item->datacallback) {
 							datadone = item->datacallback(msgbuf, res, item->priv);
 						}
 
@@ -1417,6 +1481,7 @@ restartselect:
 							close(item->fd);
 							get_totaltime(item, &timestamp);
 							if (item->finalcallback) item->finalcallback(item->priv);
+							http2_cleanup(item);
 							item->fd = -1;
 							activesockets--;
 							pending--;

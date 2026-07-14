@@ -29,6 +29,7 @@ static char rcsid[] = "$Id$";
 #include "contest.h"
 #include "httpcookies.h"
 #include "httptest.h"
+#include "http2.h"
 #include "dns.h"
 
 
@@ -209,7 +210,10 @@ check_for_endofheaders:
 			int contlen;
 
 			/* We have an end-of-header delimiter, but it could be just a "100 Continue" response */
-			sscanf(item->headers, "HTTP/1.%d %d", &http1subver, &httpstatus);
+			if (strncmp((char *)item->headers, "HTTP/2", 6) == 0)
+				sscanf(item->headers, "HTTP/2 %d", &httpstatus);
+			else
+				sscanf(item->headers, "HTTP/1.%d %d", &http1subver, &httpstatus);
 			if (httpstatus == 100) {
 				/* 
 				 * It's a "100"  continue-status.
@@ -300,8 +304,10 @@ void tcp_http_final_callback(void *priv)
 		int http1subver;
 		char *p;
 
-		/* TODO: HTTP2 ? */
-		sscanf(item->headers, "HTTP/1.%d %d", &http1subver, &item->httpstatus);
+		if (strncmp((char *)item->headers, "HTTP/2", 6) == 0)
+			sscanf(item->headers, "HTTP/2 %d", &item->httpstatus);
+		else
+			sscanf(item->headers, "HTTP/1.%d %d", &http1subver, &item->httpstatus);
 
 		item->contenttype = NULL;
 		p = item->headers;
@@ -337,6 +343,7 @@ void add_http_test(testitem_t *t)
 	char *sslopt_ciphers = NULL;
 	int sslopt_version = SSLVERSION_DEFAULT;
 	char *sslopt_clientcert = NULL;
+	char *sslopt_alpns = NULL;
 	int  httpversion = HTTPVER_11;
 	cookielist_t *ck = NULL;
 	int firstcookie = 1;
@@ -485,20 +492,48 @@ void add_http_test(testitem_t *t)
 		break;
 	}
 
-	if (httptest->weburl.desturl->schemeopts) {
-		if      (strstr(httptest->weburl.desturl->schemeopts, "3"))      sslopt_version = SSLVERSION_V3;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "2"))      sslopt_version = SSLVERSION_V2;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "t"))      sslopt_version = SSLVERSION_TLS10;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "a"))      sslopt_version = SSLVERSION_TLS10;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "b"))      sslopt_version = SSLVERSION_TLS11;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "c"))      sslopt_version = SSLVERSION_TLS12;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "d"))      sslopt_version = SSLVERSION_TLS13;
+	{
+		int httpver_pinned = 0;
 
-		if      (strstr(httptest->weburl.desturl->schemeopts, "h"))      sslopt_ciphers = ciphershigh;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "m"))      sslopt_ciphers = ciphersmedium;
+		if (httptest->weburl.desturl->schemeopts) {
+			/*
+			 * "h2" must be matched exactly and before the single-character
+			 * option tests below, otherwise the "h" (HIGH ciphers) and "2"
+			 * (SSLv2) substrings would match it by accident.
+			 */
+			if (strcmp(httptest->weburl.desturl->schemeopts, "h2") == 0) {
+				/* httpsh2:// - require HTTP/2 (offer only "h2" via ALPN) */
+				sslopt_alpns = "h2";
+			}
+			else {
+				if      (strstr(httptest->weburl.desturl->schemeopts, "3"))      sslopt_version = SSLVERSION_V3;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "2"))      sslopt_version = SSLVERSION_V2;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "t"))      sslopt_version = SSLVERSION_TLS10;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "a"))      sslopt_version = SSLVERSION_TLS10;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "b"))      sslopt_version = SSLVERSION_TLS11;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "c"))      sslopt_version = SSLVERSION_TLS12;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "d"))      sslopt_version = SSLVERSION_TLS13;
 
-		if      (strstr(httptest->weburl.desturl->schemeopts, "10"))     httpversion    = HTTPVER_10;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "11"))     httpversion    = HTTPVER_11;
+				if      (strstr(httptest->weburl.desturl->schemeopts, "h"))      sslopt_ciphers = ciphershigh;
+				else if (strstr(httptest->weburl.desturl->schemeopts, "m"))      sslopt_ciphers = ciphersmedium;
+
+				if      (strstr(httptest->weburl.desturl->schemeopts, "10"))     { httpversion = HTTPVER_10; httpver_pinned = 1; }
+				else if (strstr(httptest->weburl.desturl->schemeopts, "11"))     { httpversion = HTTPVER_11; httpver_pinned = 1; }
+			}
+		}
+
+		/*
+		 * Automatic HTTP/2: on a plain https:// test - TLS, not proxied, not
+		 * pinned to HTTP/1.x, and not already required to be h2 - offer ALPN
+		 * "h2,http/1.1" and speak whichever the server negotiates. Only when
+		 * xymonnet was built with nghttp2.
+		 */
+		if (!sslopt_alpns && http2_available() && !httpver_pinned &&
+		    (httptest->weburl.proxyurl == NULL) &&
+		    httptest->weburl.desturl->scheme &&
+		    (strcmp(httptest->weburl.desturl->scheme, "https") == 0)) {
+			sslopt_alpns = "h2,http/1.1";
+		}
 	}
 
 	/* Get any cookies */
@@ -674,11 +709,12 @@ void add_http_test(testitem_t *t)
 	if (httptest->weburl.postdata) addtobuffer(httprequest, httptest->weburl.postdata);
 
 	/* Pickup any SSL options the user wants */
-	if (sslopt_ciphers || (sslopt_version != SSLVERSION_DEFAULT) || sslopt_clientcert){
+	if (sslopt_ciphers || (sslopt_version != SSLVERSION_DEFAULT) || sslopt_clientcert || sslopt_alpns){
 		sslopt = (ssloptions_t *) malloc(sizeof(ssloptions_t));
 		sslopt->cipherlist = sslopt_ciphers;
 		sslopt->sslversion = sslopt_version;
 		sslopt->clientcert = sslopt_clientcert;
+		sslopt->alpns = sslopt_alpns;
 	}
 
 	/* Add to TCP test queue */

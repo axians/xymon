@@ -25,12 +25,12 @@ PROGRAMS += $(SNMPPROGRAMS)
 endif
 all: $(PROGRAMS) $(EXTENSIONS) $(DBGTOOLS)
 
-NETTESTOBJS = xymonnet.o contest.o httptest.o httpresult.o ldaptest.o dns.o dns2.o httpcookies.o udpquery.o
+NETTESTOBJS = xymonnet.o contest.o httptest.o http2.o httpresult.o ldaptest.o dns.o dns2.o httpcookies.o udpquery.o
 PINGTESTOBJS = xymonping.o
 BEASTATOBJS = beastat.o
 
 xymonnet: $(NETTESTOBJS) $(XYMONCOMMLIB) $(XYMONTIMELIB) $(XYMONLIBS)
-	$(CC) $(CFLAGS) -o $@ $(RPATHOPT) $(NETTESTOBJS) $(CARESLIBS) $(LDAPLIBS) $(XYMONTIMELIBS) $(XYMONCOMMLIBS) $(XYMONLIBS) $(PCRELIBS)
+	$(CC) $(CFLAGS) -o $@ $(RPATHOPT) $(NETTESTOBJS) $(CARESLIBS) $(LDAPLIBS) $(NGHTTP2LIBS) $(XYMONTIMELIBS) $(XYMONCOMMLIBS) $(XYMONLIBS) $(PCRELIBS)
 
 xymonping: $(PINGTESTOBJS) $(XYMONTIMELIB) ../lib/libxymon.a
 	$(CC) $(CFLAGS) -o $@ $(PINGTESTOBJS) $(XYMONTIMELIBS) $(XYMONCOMMLIBS)
@@ -44,13 +44,16 @@ ldaptest.o: ldaptest.c
 	$(CC) $(CFLAGS) $(LDAPFLAGS) $(LDAPINCDIR) -c -o $@ ldaptest.c
 
 httptest.o: httptest.c
-	$(CC) $(CFLAGS) $(SSLFLAGS) $(SSLINCDIR) -c -o $@ httptest.c
+	$(CC) $(CFLAGS) $(SSLFLAGS) $(NGHTTP2FLAGS) $(SSLINCDIR) $(NGHTTP2INCDIR) -c -o $@ httptest.c
 
 httpresult.o: httpresult.c
 	$(CC) $(CFLAGS) $(SSLFLAGS) $(SSLINCDIR) -c -o $@ httpresult.c
 
+http2.o: http2.c http2.h
+	$(CC) $(CFLAGS) $(SSLFLAGS) $(NGHTTP2FLAGS) $(SSLINCDIR) $(NGHTTP2INCDIR) -c -o $@ http2.c
+
 contest.o: contest.c
-	$(CC) $(CFLAGS) $(SSLFLAGS) $(SSLINCDIR) -c -o $@ contest.c
+	$(CC) $(CFLAGS) $(SSLFLAGS) $(NGHTTP2FLAGS) $(SSLINCDIR) $(NGHTTP2INCDIR) -c -o $@ contest.c
 
 dns.o: $(LOCALCARES) dns.c
 	$(CC) $(CFLAGS) $(CARESINC) -c -o $@ dns.c
@@ -81,8 +84,8 @@ beastat.o: beastat.c
 	$(CC) $(CFLAGS) $(PCREINCDIR) -c -o $@ beastat.c
 
 
-contest: contest.c httptest.o dns.o dns2.o httpcookies.o $(XYMONCOMMLIB) $(XYMONTIMELIB)
-	$(CC) $(CFLAGS) -o contest -I../include $(CARESINC) -DSTANDALONE contest.c httptest.o dns.o dns2.o httpcookies.o $(CARESLIBS) $(XYMONCOMMLIBS) $(XYMONTIMELIBS)
+contest: contest.c httptest.o http2.o dns.o dns2.o httpcookies.o $(XYMONCOMMLIB) $(XYMONTIMELIB)
+	$(CC) $(CFLAGS) $(SSLFLAGS) $(NGHTTP2FLAGS) -o contest -I../include $(CARESINC) $(NGHTTP2INCDIR) -DSTANDALONE contest.c httptest.o http2.o dns.o dns2.o httpcookies.o $(CARESLIBS) $(NGHTTP2LIBS) $(XYMONCOMMLIBS) $(XYMONTIMELIBS)
 
 
 xymon-snmpcollect: xymon-snmpcollect.o $(XYMONCOMMLIB) $(XYMONTIMELIB)
