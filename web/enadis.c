@@ -34,6 +34,8 @@ int enablecount = 0;
 char **enabletest = NULL;
 int duration = 0;
 int scale = 1;
+int untilok = 0;	/* "Disable until OK" checkbox */
+int untilokmax = 0;	/* Optional deadline for until-OK, in hours. 0 = none */
 char *disablemsg = "No reason given";
 time_t schedtime = 0;
 time_t endtime = 0;
@@ -111,9 +113,11 @@ void parse_cgi(void)
 		}
 		else if (strcmp(pwalk->name, "untilok") == 0) {
 			if (strcasecmp(pwalk->value, "on") == 0) {
-				duration = -1;
-				scale = 1;
+				untilok = 1;
 			}
+		}
+		else if (strcmp(pwalk->name, "untilokmax") == 0) {
+			untilokmax = atoi(pwalk->value);
 		}
 		else if (strcmp(pwalk->name, "scale") == 0) {
 			scale = atoi(pwalk->value);
@@ -225,6 +229,18 @@ void parse_cgi(void)
 		}
 
 		pwalk = pwalk->next;
+	}
+
+	if (untilok) {
+		/*
+		 * Disable until OK. With a max-duration (hours) also set, send the
+		 * bounded form "-DURATION" (until OK, but at latest DURATION from
+		 * now); otherwise the classic "-1" (until OK). xymond may still cap
+		 * either form via MAXDISABLEDURATION.
+		 */
+		if (untilokmax > 0) duration = -(untilokmax * 60);
+		else duration = -1;
+		scale = 1;
 	}
 
 	schedtm.tm_isdst = -1;

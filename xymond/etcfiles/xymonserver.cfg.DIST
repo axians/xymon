@@ -43,6 +43,10 @@ XYMONLOGSTATUS="DYNAMIC"	# Are HTML status logs statically or dynamically genera
 				# Use DYNAMIC with Xymon, unless you run xymond_filestore --status --html
 STATUSLIFETIME="30"		# Default number of minutes a status is valid after an update. After this
 				# time has elapsed, the status will go purple.
+MAXDISABLEDURATION="30d"	# Longest time any test can be disabled (blue). Longer requests are
+				# shortened to this, and "disable until OK" becomes "until OK, at
+				# latest this long". Set to 0 to allow unlimited disables (the
+				# behaviour of older Xymon versions).
 
 PINGCOLUMN="conn"		# Column where the ping-test reports results.
 INFOCOLUMN="info"		# Column where the info-pages are reported.

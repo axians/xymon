@@ -625,6 +625,17 @@ static void generate_xymon_disable(char *hostname, strbuffer_t *buf)
 	addtobuffer(buf, "</SELECT>\n");
 
 	addtobuffer(buf, "            &nbsp;&nbsp;-&nbsp;OR&nbsp;-&nbsp;until&nbsp;OK:<input name=\"untilok\" type=checkbox onClick=\"setcheck(this.form.go2,true)\">");
+	addtobuffer(buf, "            &nbsp;(max&nbsp;<input name=\"untilokmax\" type=text size=4 maxlength=6>&nbsp;hours)");
+	{
+		/* Tell the user about the server-wide cap on disables, if one is set */
+		int maxdisabledur = durationvalue(xgetenv("MAXDISABLEDURATION"));
+
+		if (maxdisabledur > 0) {
+			addtobuffer(buf, "<br>Note: this server limits all disables to ");
+			addtobuffer(buf, durationstring(60*maxdisabledur));
+			addtobuffer(buf, " at most\n");
+		}
+	}
 	addtobuffer(buf, "              </td></tr>\n");
 	addtobuffer(buf, "            </table> \n");
 
@@ -783,7 +794,20 @@ static void generate_xymon_enable(char *hostname, strbuffer_t *buf)
 		addtobuffer(buf, tnames[i].name);
 		addtobuffer(buf, "</td>\n");
 		addtobuffer(buf, "<td>");
-		addtobuffer(buf, (tnames[i].distime == -1) ? "OK" : ctime(&tnames[i].distime));
+		if (tnames[i].distime == -1) {
+			addtobuffer(buf, "OK");
+		}
+		else if (tnames[i].distime < -1) {
+			/* Until OK, but at latest until the (negated) deadline */
+			time_t deadline = -tnames[i].distime;
+
+			addtobuffer(buf, "OK (max ");
+			addtobuffer(buf, ctime(&deadline));
+			addtobuffer(buf, ")");
+		}
+		else {
+			addtobuffer(buf, ctime(&tnames[i].distime));
+		}
 		addtobuffer(buf, "</td>\n");
 
 		/* Add an HTML'ized form of the disable-message */

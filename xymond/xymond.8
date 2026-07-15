@@ -339,6 +339,20 @@ Re-read the hosts.cfg configuration file.
 .IP SIGUSR1
 Force an immediate dump of the checkpoint file.
 
+.SH ENVIRONMENT
+.IP STATUSLIFETIME
+Default number of minutes a status is valid after an update; after this
+time has elapsed, the status goes purple. Default: 30.
+
+.IP MAXDISABLEDURATION
+The longest time any test can be disabled (blue), in the same duration
+syntax as the "disable" command (e.g. "30d"). Requests to disable a test
+for longer are silently shortened to this limit, and "disable until OK"
+requests become "until OK, but at latest this long from now". Set to 0
+to allow unlimited disables, which restores the behaviour of older Xymon
+versions. Default: 30d (one month). Normally set in
+.I xymonserver.cfg(5)
+
 .SH BUGS
 Timeout of incoming connections are not strictly enforced. The check
 for a timeout only triggers during the normal network handling loop,
