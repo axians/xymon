@@ -921,4 +921,195 @@ int dns_soa_is_predecessor(unsigned int candidate, unsigned int reference)
 	return (int)(reference - candidate) > 0;
 }
 
+#ifdef XYMON_DNS_USE_ARES_DNS_RECORD
+/*
+ * Cross-NS content comparison (issue #235). Independent of
+ * dns_render_rr_arespec() (which is display-formatted for the visible test
+ * banner) so this comparison logic can evolve without risking a regression
+ * in the already-shipped display output, and vice versa.
+ *
+ * dns_rr_normalize_key() builds a canonical "name|class|type|rdata..." key
+ * for one RR, deliberately excluding the TTL (TTLs legitimately differ
+ * between nameservers as they count down independently) so two RRs with
+ * identical data but different remaining TTLs still compare equal.
+ *
+ * If blank_soa_serial is set, an SOA record's serial number is rendered as
+ * a fixed placeholder ("*") instead of its real value. This lets the
+ * caller run the comparison twice: once normally (fast path - byte
+ * identical responses match trivially), and if that fails, once with the
+ * serial blanked - if that second pass matches, the two nameservers agree
+ * on everything except the serial, which is exactly the "hasn't refreshed
+ * yet" case dns_soa_is_predecessor() is meant to classify, rather than a
+ * genuine content divergence.
+ */
+static void dns_rr_normalize_key(const ares_dns_rr_t *rr, char *buf, size_t buflen, int blank_soa_serial)
+{
+	int type, dnsclass;
+	const char *name;
+	char tmp[1024];
+
+	if (rr == NULL) { if (buflen) buf[0] = '\0'; return; }
+
+	name = ares_dns_rr_get_name(rr);
+	type = (int)ares_dns_rr_get_type(rr);
+	dnsclass = (int)ares_dns_rr_get_class(rr);
+
+	snprintf(buf, buflen, "%s|%d|%d|", (name ? name : ""), dnsclass, type);
+	tmp[0] = '\0';
+
+	switch (type) {
+	  case ARES_REC_TYPE_CNAME:
+		snprintf(tmp, sizeof(tmp), "%s", ares_dns_rr_get_str(rr, ARES_RR_CNAME_CNAME));
+		break;
+
+	  case ARES_REC_TYPE_NS:
+		snprintf(tmp, sizeof(tmp), "%s", ares_dns_rr_get_str(rr, ARES_RR_NS_NSDNAME));
+		break;
+
+	  case ARES_REC_TYPE_PTR:
+		snprintf(tmp, sizeof(tmp), "%s", ares_dns_rr_get_str(rr, ARES_RR_PTR_DNAME));
+		break;
+
+	  case ARES_REC_TYPE_HINFO:
+		snprintf(tmp, sizeof(tmp), "%s|%s",
+			ares_dns_rr_get_str(rr, ARES_RR_HINFO_CPU), ares_dns_rr_get_str(rr, ARES_RR_HINFO_OS));
+		break;
+
+	  case ARES_REC_TYPE_MX:
+		snprintf(tmp, sizeof(tmp), "%u|%s",
+			ares_dns_rr_get_u16(rr, ARES_RR_MX_PREFERENCE), ares_dns_rr_get_str(rr, ARES_RR_MX_EXCHANGE));
+		break;
+
+	  case ARES_REC_TYPE_SOA:
+		if (blank_soa_serial) {
+			snprintf(tmp, sizeof(tmp), "%s|%s|*|%u|%u|%u|%u",
+				ares_dns_rr_get_str(rr, ARES_RR_SOA_MNAME), ares_dns_rr_get_str(rr, ARES_RR_SOA_RNAME),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_REFRESH), ares_dns_rr_get_u32(rr, ARES_RR_SOA_RETRY),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_EXPIRE), ares_dns_rr_get_u32(rr, ARES_RR_SOA_MINIMUM));
+		} else {
+			snprintf(tmp, sizeof(tmp), "%s|%s|%u|%u|%u|%u|%u",
+				ares_dns_rr_get_str(rr, ARES_RR_SOA_MNAME), ares_dns_rr_get_str(rr, ARES_RR_SOA_RNAME),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_SERIAL), ares_dns_rr_get_u32(rr, ARES_RR_SOA_REFRESH),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_RETRY), ares_dns_rr_get_u32(rr, ARES_RR_SOA_EXPIRE),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_MINIMUM));
+		}
+		break;
+
+	  case ARES_REC_TYPE_TXT:
+	  {
+		size_t cnt = ares_dns_rr_get_abin_cnt(rr, ARES_RR_TXT_DATA);
+		size_t j, off = 0;
+		for (j = 0; j < cnt; j++) {
+			size_t len = 0;
+			const unsigned char *data = ares_dns_rr_get_abin(rr, ARES_RR_TXT_DATA, j, &len);
+			if (off < sizeof(tmp))
+				off += (size_t)snprintf(tmp + off, sizeof(tmp) - off, "%.*s|", (int)len, (data ? (const char *)data : ""));
+		}
+		break;
+	  }
+
+	  case ARES_REC_TYPE_A:
+	  {
+		const struct in_addr *addr = ares_dns_rr_get_addr(rr, ARES_RR_A_ADDR);
+		if (addr) snprintf(tmp, sizeof(tmp), "%s", inet_ntoa(*addr));
+		break;
+	  }
+
+	  case ARES_REC_TYPE_AAAA:
+	  {
+		const struct ares_in6_addr *addr6 = ares_dns_rr_get_addr6(rr, ARES_RR_AAAA_ADDR);
+		if (addr6) {
+			struct in6_addr localaddr6;
+			char abuf[64];
+			memcpy(&localaddr6, addr6, sizeof(localaddr6));
+			inet_ntop(AF_INET6, &localaddr6, abuf, sizeof(abuf));
+			snprintf(tmp, sizeof(tmp), "%s", abuf);
+		}
+		break;
+	  }
+
+	  case ARES_REC_TYPE_SRV:
+		snprintf(tmp, sizeof(tmp), "%u|%u|%u|%s",
+			ares_dns_rr_get_u16(rr, ARES_RR_SRV_PRIORITY), ares_dns_rr_get_u16(rr, ARES_RR_SRV_WEIGHT),
+			ares_dns_rr_get_u16(rr, ARES_RR_SRV_PORT), ares_dns_rr_get_str(rr, ARES_RR_SRV_TARGET));
+		break;
+
+	  default:
+		/* Other/unsupported types: name|class|type above is already a
+		 * reasonable (if coarse) comparison key on its own. */
+		break;
+	}
+
+	strncat(buf, tmp, (buflen > strlen(buf)) ? (buflen - strlen(buf) - 1) : 0);
+}
+
+static int dns_strcmp_qsort(const void *a, const void *b)
+{
+	char * const *sa = (char * const *)a;
+	char * const *sb = (char * const *)b;
+	return strcmp(*sa, *sb);
+}
+
+/*
+ * Build a normalized, order-independent representation of one section of a
+ * parsed DNS response (sorted, newline-joined per-RR keys), for content
+ * comparison across nameservers. Caller must xfree() the returned buffer.
+ */
+char *dns_section_normalize(ares_dns_record_t *dnsrec, ares_dns_section_t sect, int blank_soa_serial)
+{
+	size_t cnt = ares_dns_record_rr_cnt(dnsrec, sect);
+	char **keys;
+	size_t i, total = 1;
+	char *out;
+
+	if (cnt == 0) return strdup("");
+
+	keys = (char **)calloc(cnt, sizeof(char *));
+	if (keys == NULL) return strdup("");
+
+	for (i = 0; i < cnt; i++) {
+		char kbuf[1024];
+		dns_rr_normalize_key(ares_dns_record_rr_get_const(dnsrec, sect, i), kbuf, sizeof(kbuf), blank_soa_serial);
+		keys[i] = strdup(kbuf);
+		total += strlen(keys[i]) + 1;
+	}
+
+	qsort(keys, cnt, sizeof(char *), dns_strcmp_qsort);
+
+	out = (char *)malloc(total);
+	if (out != NULL) {
+		out[0] = '\0';
+		for (i = 0; i < cnt; i++) {
+			strcat(out, keys[i]);
+			strcat(out, "\n");
+		}
+	}
+	for (i = 0; i < cnt; i++) xfree(keys[i]);
+	xfree(keys);
+
+	return (out != NULL) ? out : strdup("");
+}
+
+/*
+ * Compare two parsed DNS responses (from two different nameservers, same
+ * query) for content equality across all three sections, ignoring record
+ * order and TTLs. See dns_rr_normalize_key() for what blank_soa_serial
+ * does. Returns true (non-zero) if equal.
+ */
+int dns_response_content_equal(ares_dns_record_t *a, ares_dns_record_t *b, int blank_soa_serial)
+{
+	static const ares_dns_section_t sects[3] = { ARES_SECTION_ANSWER, ARES_SECTION_AUTHORITY, ARES_SECTION_ADDITIONAL };
+	int i, equal = 1;
+
+	for (i = 0; equal && (i < 3); i++) {
+		char *na = dns_section_normalize(a, sects[i], blank_soa_serial);
+		char *nb = dns_section_normalize(b, sects[i], blank_soa_serial);
+		if (strcmp(na, nb) != 0) equal = 0;
+		xfree(na);
+		xfree(nb);
+	}
+	return equal;
+}
+#endif /* XYMON_DNS_USE_ARES_DNS_RECORD */
+
 
