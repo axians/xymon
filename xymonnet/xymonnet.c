@@ -446,6 +446,9 @@ void load_tests(void)
 			if (p) h->routerdeps = p + strlen(routestring);
 		}
 
+		p = xmh_custom_item(hwalk, "dns-ns:");
+		if (p) h->crossns = p + strlen("dns-ns:");
+
 		if (xmh_item(hwalk, XMH_FLAG_NOCONN)) h->noconn = 1;
 		if (xmh_item(hwalk, XMH_FLAG_NOPING)) h->noping = 1;
 		if (xmh_item(hwalk, XMH_FLAG_TRACE)) h->dotrace = 1;
@@ -1062,7 +1065,7 @@ void run_nslookup_service(service_t *service)
 				lookup = t->host->hostname;
 			}
 
-			t->open = (dns_test_server(ip_to_test(t->host), lookup, t->banner) == 0);
+			t->open = (dns_test_server(ip_to_test(t->host), lookup, t->host->crossns, t->banner) == 0);
 		}
 	}
 }
