@@ -26,7 +26,7 @@ extern int dns_name_type(char *name);
  * wire-format buffers only, so dns.c's networking/orchestration code never
  * needs to know about ares_dns_record_t directly -- that stays entirely
  * inside dns2.c, alongside the ARES_VERSION gate that decides whether it's
- * even available. On c-ares < 1.22, dns_extract_ns_names() returns NULL
+ * even available. On c-ares < 1.32, dns_extract_ns_names() returns NULL
  * and dns_crossns_evaluate() returns true (nothing to check / consistent),
  * so callers automatically get today's single-server-only behavior.
  */

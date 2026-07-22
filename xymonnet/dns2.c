@@ -56,8 +56,20 @@ static char rcsid[] = "$Id$";
  * legacy adig-derived parser below. Several widely used platforms (Debian
  * 12, RHEL/Rocky/Alma 8 and 9) still ship c-ares below this floor, so the
  * legacy path must be kept for the foreseeable future.
+ *
+ * The 1.22 baseline only guarantees the parser entry points themselves;
+ * several accessor functions this file relies on were added later as the
+ * API matured:
+ *   - ares_dns_record_rr_get_const(): missing in 1.27.0 (e.g. Ubuntu 24.04
+ *     "noble"), present by 1.30.0.
+ *   - ares_dns_rr_get_abin()/ares_dns_rr_get_abin_cnt() (and the TXT record
+ *     switching from ARES_DATATYPE_BINP to ARES_DATATYPE_ABINP): still
+ *     missing in 1.30.0, present by 1.32.0.
+ * Gate on 1.32.0, the oldest release confirmed (by inspecting its public
+ * headers) to provide all of the above, rather than the 1.22.0 floor that
+ * only covers ares_dns_parse()/ares_dns_record_t existing at all.
  */
-#if ARES_VERSION >= 0x011600
+#if ARES_VERSION >= 0x012000
 #include <ares_dns_record.h>
 #define XYMON_DNS_USE_ARES_DNS_RECORD 1
 #endif
@@ -575,7 +587,7 @@ static const unsigned char *display_rr(const unsigned char *aptr,
 
 #ifdef XYMON_DNS_USE_ARES_DNS_RECORD
 /*
- * Structured-record renderer (c-ares >= 1.22). Produces the same text
+ * Structured-record renderer (c-ares >= 1.32). Produces the same text
  * output as the legacy adig-derived parser above for the record types it
  * shares with it, but reads fields via ares_dns_parse()/ares_dns_record_t
  * accessors instead of hand-parsing the wire format. It additionally
