@@ -897,3 +897,28 @@ int dns_name_type(char *name)
 	return T_A;
 }
 
+/*
+ * RFC 1982 serial number arithmetic (issue #235 cross-NS consistency check).
+ * SOA serials are a 32-bit circular sequence space, not plain integers: they
+ * are expected to eventually wrap from 4294967295 back to 0, so a naive
+ * "candidate < reference" comparison gives the wrong answer near that
+ * wraparound (e.g. candidate=4294967290, reference=5 is really 11 steps
+ * *ahead*, not "way behind"). This computes the comparison the way the RFC
+ * specifies: subtract as unsigned 32-bit, then reinterpret the bit pattern
+ * as signed 32-bit.
+ *
+ * Returns true if "candidate" is a serial-order predecessor of "reference"
+ * (i.e. a nameserver reporting "candidate" just hasn't caught up to
+ * "reference" yet - the common in-progress-AXFR / not-yet-refreshed case,
+ * not a genuine inconsistency). Returns false if reference==candidate
+ * (exact match - handled separately by the caller), if candidate is
+ * serial-order *ahead* of reference, or if they are exactly 2^31 apart (the
+ * one case RFC 1982 leaves undefined) - all of which should be escalated
+ * for content comparison rather than silently accepted as normal lag.
+ */
+int dns_soa_is_predecessor(unsigned int candidate, unsigned int reference)
+{
+	return (int)(reference - candidate) > 0;
+}
+
+
