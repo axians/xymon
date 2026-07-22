@@ -958,6 +958,39 @@ the nameservers for the "bar.org" domain, "dns=ns:bar.org".
 You can list multiple lookups, separated by commas. For the
 test to end up with a green status, all lookups must succeed.
 
+Every "dns=" lookup that resolves against a zone apex also
+automatically performs a cross-nameserver consistency check:
+xymonnet looks up the NS records for the queried name, resolves
+each nameserver via the normal system resolver, re-queries all of
+them for the same record, and compares the answers. A genuine
+content mismatch between nameservers fails the test (red); a
+nameserver whose answer differs only in its SOA serial number is
+reported as informational "syncing" text rather than a failure,
+since telling ordinary replication lag apart from a real problem
+cannot be done reliably from a single check. See "dns-ns:" below
+to control or disable this behaviour.
+
+.IP "dns-ns:off"
+.IP "dns-ns:none"
+.IP "dns-ns:ns1[,ns2,...]"
+Controls the automatic cross-nameserver consistency check
+performed for "dns=" tests on this host (see above). Without this
+tag, the check runs automatically using dynamically discovered NS
+records - no configuration is needed for the common case.
+
+Use "dns-ns:off" or "dns-ns:none" to disable the check entirely
+for this host. This is useful for zones whose nameservers are
+intentionally run as independent, unsynchronized clusters (some
+large multi-provider or multi-primary setups behave this way by
+design), where "consistency" between nameservers is not a
+meaningful concept.
+
+Use "dns-ns:ns1,ns2,..." (a comma-separated list of nameserver
+hostnames or IP addresses, no spaces) to check against exactly
+this set of nameservers instead of the dynamically discovered NS
+records - e.g. to restrict the check to a known-consistent subset
+of a zone's nameservers.
+
 
 .SH OTHER NETWORK TESTS
 .IP ntp
