@@ -18,6 +18,7 @@ typedef struct dns_resp_t {
 } dns_resp_t;
 
 extern void dns_detail_callback(void *arg, int status, int timeouts, unsigned char *abuf, int alen);
+extern int dns_soa_is_predecessor(unsigned int candidate, unsigned int reference);
 extern int dns_name_type(char *name);
 
 #endif
