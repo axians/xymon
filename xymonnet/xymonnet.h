@@ -102,6 +102,11 @@ typedef struct testedhost_t {
 	int downcount;		/* number of successive failed conn tests */
 	time_t downstart;	/* time() of first conn failure */
 	char *routerdeps;       /* Hosts from the "router:" tag */
+	char *crossns;          /* Value of the "dns-ns:" tag: NULL for automatic
+	                         * NS discovery, "off"/"none" to disable the
+	                         * dns= cross-NS consistency check (issue #235),
+	                         * or a comma-separated static NS hostname/IP list
+	                         * to use instead of dynamic NS-record discovery */
 	struct testedhost_t *deprouterdown;    /* Set if dependent router is down */
 	int dotrace;		/* Run traceroute for this host */
 	strbuffer_t *traceroute;/* traceroute results */

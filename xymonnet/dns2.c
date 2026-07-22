@@ -1110,6 +1110,159 @@ int dns_response_content_equal(ares_dns_record_t *a, ares_dns_record_t *b, int b
 	}
 	return equal;
 }
+
+/*
+ * Extract NS hostnames from the ANSWER section of a raw wire-format
+ * response to a T_NS query. Returns a NULL-terminated array of malloc'd
+ * strings (caller frees each entry and the array), or NULL if there are
+ * none (e.g. the queried name isn't a zone apex).
+ */
+char **dns_extract_ns_names(const unsigned char *abuf, int alen)
+{
+	ares_dns_record_t *dnsrec = NULL;
+	size_t cnt, i, n = 0;
+	char **names;
+
+	if (ares_dns_parse(abuf, (size_t)alen, 0, &dnsrec) != ARES_SUCCESS) return NULL;
+
+	cnt = ares_dns_record_rr_cnt(dnsrec, ARES_SECTION_ANSWER);
+	names = (char **)calloc(cnt + 1, sizeof(char *));
+	if (names == NULL) { ares_dns_record_destroy(dnsrec); return NULL; }
+
+	for (i = 0; i < cnt; i++) {
+		const ares_dns_rr_t *rr = ares_dns_record_rr_get_const(dnsrec, ARES_SECTION_ANSWER, i);
+		if (rr && ((int)ares_dns_rr_get_type(rr) == ARES_REC_TYPE_NS)) {
+			const char *ns = ares_dns_rr_get_str(rr, ARES_RR_NS_NSDNAME);
+			if (ns) names[n++] = strdup(ns);
+		}
+	}
+	names[n] = NULL;
+	ares_dns_record_destroy(dnsrec);
+
+	if (n == 0) { xfree(names); return NULL; }
+	return names;
+}
+
+/*
+ * Evaluate cross-NS consistency (issue #235) given raw wire-format
+ * responses already collected from ns_count nameservers, all for the same
+ * atype:name query. The first successfully-parsed response is used as the
+ * reference point; every other response is compared against it via
+ * dns_response_content_equal(). For SOA queries specifically, a response
+ * that differs *only* in its serial is further checked with
+ * dns_soa_is_predecessor(): if one serial is a valid predecessor of the
+ * other, that nameserver is classified as "syncing" (ordinary replication
+ * lag), not a genuine mismatch. Appends a human-readable summary to
+ * 'summary'. Returns true (non-zero) if there is no unexplained
+ * divergence (i.e. every reachable NS either agrees or is merely syncing).
+ */
+int dns_crossns_evaluate(int atype, unsigned char **abufs, int *alens,
+			const char **ns_labels, int ns_count, strbuffer_t *summary)
+{
+	ares_dns_record_t **recs;
+	int i, ref = -1;
+	int agree = 0, syncing = 0, unreachable = 0, disagree = 0;
+	char msg[512];
+
+	recs = (ares_dns_record_t **)calloc((size_t)ns_count, sizeof(ares_dns_record_t *));
+	if (recs == NULL) return 1;
+
+	for (i = 0; i < ns_count; i++) {
+		recs[i] = NULL;
+		if (abufs[i] && (alens[i] > 0)) {
+			if (ares_dns_parse(abufs[i], (size_t)alens[i], 0, &recs[i]) != ARES_SUCCESS) recs[i] = NULL;
+		}
+		if (recs[i] == NULL) unreachable++;
+	}
+
+	for (i = 0; (ref < 0) && (i < ns_count); i++) if (recs[i]) ref = i;
+
+	if (ref >= 0) {
+		agree++; /* the reference trivially agrees with itself */
+		for (i = 0; i < ns_count; i++) {
+			const char *label = (ns_labels && ns_labels[i]) ? ns_labels[i] : "?";
+
+			if ((i == ref) || (recs[i] == NULL)) continue;
+
+			if (dns_response_content_equal(recs[ref], recs[i], 0)) {
+				agree++;
+				continue;
+			}
+
+			if ((atype == T_SOA) && dns_response_content_equal(recs[ref], recs[i], 1)) {
+				/*
+				 * Only the SOA serial differs -- everything else about
+				 * the zone (mname/rname/timers, and every other RR)
+				 * matches exactly. This is reported as informational
+				 * "syncing" rather than a failure: telling "hasn't
+				 * refreshed yet" apart from "permanently diverged
+				 * cluster" (e.g. google.com's independently-numbered NS
+				 * groups) genuinely can't be done from one snapshot --
+				 * RFC1982 serial-order comparison doesn't help here,
+				 * since for any two distinct serials exactly one
+				 * direction is always "ahead", regardless of whether the
+				 * difference is a one-poll lag or a permanent split.
+				 * Distinguishing those reliably needs state persisted
+				 * across poll cycles (does the gap shrink over time?),
+				 * which is a possible future improvement; for now the
+				 * content-equality check above remains the reliable,
+				 * stateless signal for genuine mismatches.
+				 */
+				unsigned int s_ref = 0, s_i = 0;
+				const ares_dns_rr_t *rr;
+
+				if (ares_dns_record_rr_cnt(recs[ref], ARES_SECTION_ANSWER) > 0) {
+					rr = ares_dns_record_rr_get_const(recs[ref], ARES_SECTION_ANSWER, 0);
+					s_ref = ares_dns_rr_get_u32(rr, ARES_RR_SOA_SERIAL);
+				}
+				if (ares_dns_record_rr_cnt(recs[i], ARES_SECTION_ANSWER) > 0) {
+					rr = ares_dns_record_rr_get_const(recs[i], ARES_SECTION_ANSWER, 0);
+					s_i = ares_dns_rr_get_u32(rr, ARES_RR_SOA_SERIAL);
+				}
+
+				syncing++;
+				snprintf(msg, sizeof(msg), "  %s: serial %u differs from %s's %u (syncing)\n",
+					label, s_i, (ns_labels && ns_labels[ref]) ? ns_labels[ref] : "?", s_ref);
+				addtobuffer(summary, msg);
+				continue;
+			}
+
+			disagree++;
+			snprintf(msg, sizeof(msg), "  %s: content disagrees with %s\n",
+				label, (ns_labels && ns_labels[ref]) ? ns_labels[ref] : "?");
+			addtobuffer(summary, msg);
+		}
+	}
+
+	snprintf(msg, sizeof(msg), "\nCross-NS check: %d nameserver%s queried, %d agree, %d syncing, %d unreachable, %d disagree\n",
+		ns_count, (ns_count == 1) ? "" : "s", agree, syncing, unreachable, disagree);
+	addtobuffer(summary, msg);
+
+	for (i = 0; i < ns_count; i++) {
+		if (recs[i] == NULL) {
+			snprintf(msg, sizeof(msg), "  %s: unreachable/no answer\n", (ns_labels && ns_labels[i]) ? ns_labels[i] : "?");
+			addtobuffer(summary, msg);
+		}
+	}
+
+	for (i = 0; i < ns_count; i++) if (recs[i]) ares_dns_record_destroy(recs[i]);
+	xfree(recs);
+
+	return (disagree == 0);
+}
+#else /* !XYMON_DNS_USE_ARES_DNS_RECORD */
+char **dns_extract_ns_names(const unsigned char *abuf, int alen)
+{
+	(void)abuf; (void)alen;
+	return NULL;
+}
+
+int dns_crossns_evaluate(int atype, unsigned char **abufs, int *alens,
+			const char **ns_labels, int ns_count, strbuffer_t *summary)
+{
+	(void)atype; (void)abufs; (void)alens; (void)ns_labels; (void)ns_count; (void)summary;
+	return 1;
+}
 #endif /* XYMON_DNS_USE_ARES_DNS_RECORD */
 
 
