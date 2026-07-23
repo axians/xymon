@@ -8,12 +8,12 @@
 # parser, no behavioural change).
 #
 # The wiring spans xymonnet/dns2.c:
-#   - an ARES_VERSION feature-detection gate (c-ares >= 1.32, the oldest
-#     release confirmed to provide every accessor this file calls --
+#   - an ARES_VERSION feature-detection gate (c-ares >= 1.32, the exact
+#     minimum release providing every accessor this file calls --
 #     ares_dns_parse()/ares_dns_record_t itself became public API back in
-#     1.22, but ares_dns_record_rr_get_const() wasn't added until ~1.28-1.30
-#     and ares_dns_rr_get_abin()/ares_dns_rr_get_abin_cnt() not until
-#     ~1.31-1.32) selecting between dns_render_arespec() (structured parser)
+#     1.22, ares_dns_record_rr_get_const() was added in 1.28.0, and
+#     ares_dns_rr_get_abin()/ares_dns_rr_get_abin_cnt() not until 1.32.0)
+#     selecting between dns_render_arespec() (structured parser)
 #     and dns_render_legacy() (the original adig-derived
 #     display_question()/display_rr() wire-format parser), kept as the
 #     fallback for platforms below that floor. Ubuntu 24.04 (c-ares 1.27.0)
@@ -41,14 +41,14 @@ DNS2="$ROOT/xymonnet/dns2.c"
 src=$(cat "$DNS2")
 
 # The version floor itself: c-ares 1.22 is when ares_dns_parse()/
-# ares_dns_record_t became public API, but ares_dns_record_rr_get_const() and
-# ares_dns_rr_get_abin()/ares_dns_rr_get_abin_cnt() -- both used by this file
-# -- weren't added until later (confirmed absent from 1.27.0 and 1.30.0's
-# public headers, confirmed present in 1.32.0's). Gating on 1.22 alone builds
-# fine but fails to LINK on any platform whose c-ares is 1.22-1.31 (e.g.
-# Ubuntu 24.04 "noble", c-ares 1.27.0). Getting this wrong either regresses
-# that build failure, or needlessly keeps platforms that do have the full
-# API on the legacy path.
+# ares_dns_record_t became public API, but ares_dns_record_rr_get_const()
+# (added 1.28.0) and ares_dns_rr_get_abin()/ares_dns_rr_get_abin_cnt() (added
+# 1.32.0) -- both used by this file -- weren't added until later (confirmed
+# by diffing each release's public ares_dns_record.h). Gating on 1.22 alone
+# builds fine but fails to LINK on any platform whose c-ares is 1.22-1.31
+# (e.g. Ubuntu 24.04 "noble", c-ares 1.27.0). Getting this wrong either
+# regresses that build failure, or needlessly keeps platforms that do have
+# the full API on the legacy path.
 assert_contains "ARES_VERSION >= 0x012000" "$src" \
 	"dns2.c lost (or changed) the c-ares 1.32 ARES_VERSION gate (issue #235)"
 

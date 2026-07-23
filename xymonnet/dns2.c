@@ -59,15 +59,16 @@ static char rcsid[] = "$Id$";
  *
  * The 1.22 baseline only guarantees the parser entry points themselves;
  * several accessor functions this file relies on were added later as the
- * API matured:
- *   - ares_dns_record_rr_get_const(): missing in 1.27.0 (e.g. Ubuntu 24.04
- *     "noble"), present by 1.30.0.
+ * API matured (exact introduction versions confirmed by diffing each
+ * release's public ares_dns_record.h):
+ *   - ares_dns_record_rr_get_const(): added in 1.28.0 (absent in 1.27.0,
+ *     e.g. Ubuntu 24.04 "noble").
  *   - ares_dns_rr_get_abin()/ares_dns_rr_get_abin_cnt() (and the TXT record
- *     switching from ARES_DATATYPE_BINP to ARES_DATATYPE_ABINP): still
- *     missing in 1.30.0, present by 1.32.0.
- * Gate on 1.32.0, the oldest release confirmed (by inspecting its public
- * headers) to provide all of the above, rather than the 1.22.0 floor that
- * only covers ares_dns_parse()/ares_dns_record_t existing at all.
+ *     switching from ARES_DATATYPE_BINP to ARES_DATATYPE_ABINP): added in
+ *     1.32.0 (absent through 1.31.0).
+ * Gate on 1.32.0 -- the exact minimum that provides all of the above --
+ * rather than the 1.22.0 floor that only covers ares_dns_parse()/
+ * ares_dns_record_t existing at all.
  */
 #if ARES_VERSION >= 0x012000
 #include <ares_dns_record.h>
