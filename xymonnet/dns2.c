@@ -49,6 +49,32 @@ static char rcsid[] = "$Id$";
 #include <ares_dns.h>
 #include <ares_version.h>
 
+/*
+ * c-ares >= 1.22 exposes a public, structured DNS message parser
+ * (ares_dns_parse() / ares_dns_record_t) instead of requiring hand-rolled
+ * wire-format parsing. Use it when available; otherwise fall back to the
+ * legacy adig-derived parser below. Several widely used platforms (Debian
+ * 12, RHEL/Rocky/Alma 8 and 9) still ship c-ares below this floor, so the
+ * legacy path must be kept for the foreseeable future.
+ *
+ * The 1.22 baseline only guarantees the parser entry points themselves;
+ * several accessor functions this file relies on were added later as the
+ * API matured (exact introduction versions confirmed by diffing each
+ * release's public ares_dns_record.h):
+ *   - ares_dns_record_rr_get_const(): added in 1.28.0 (absent in 1.27.0,
+ *     e.g. Ubuntu 24.04 "noble").
+ *   - ares_dns_rr_get_abin()/ares_dns_rr_get_abin_cnt() (and the TXT record
+ *     switching from ARES_DATATYPE_BINP to ARES_DATATYPE_ABINP): added in
+ *     1.32.0 (absent through 1.31.0).
+ * Gate on 1.32.0 -- the exact minimum that provides all of the above --
+ * rather than the 1.22.0 floor that only covers ares_dns_parse()/
+ * ares_dns_record_t existing at all.
+ */
+#if ARES_VERSION >= 0x012000
+#include <ares_dns_record.h>
+#define XYMON_DNS_USE_ARES_DNS_RECORD 1
+#endif
+
 #include "dns2.h"
 
 /* Some systems (AIX, HP-UX) don't know the DNS T_SRV record */
@@ -56,16 +82,49 @@ static char rcsid[] = "$Id$";
 #define T_SRV 33
 #endif
 
+/*
+ * Not every platform's <arpa/nameser_compat.h> defines these newer type
+ * macros (issue #235: CAA, TLSA, SVCB/HTTPS, DNSKEY/DS). Without a local
+ * fallback, dns_name_type() silently mismapped "dns=CAA:name" (and friends)
+ * to T_A, since the name wasn't found in the types[] table below. Numeric
+ * values are the IANA-assigned DNS RR type numbers (RFC 4034, 6698, 6844,
+ * 9460), matching ares_dns_rec_type_t's ARES_REC_TYPE_* values.
+ */
+#ifndef T_DS
+#define T_DS 43
+#endif
+#ifndef T_DNSKEY
+#define T_DNSKEY 48
+#endif
+#ifndef T_TLSA
+#define T_TLSA 52
+#endif
+#ifndef T_SVCB
+#define T_SVCB 64
+#endif
+#ifndef T_HTTPS
+#define T_HTTPS 65
+#endif
+#ifndef T_CAA
+#define T_CAA 257
+#endif
+
 static char msg[1024];
 
+static const char *type_name(int type);
+static const char *class_name(int dnsclass);
+#ifdef XYMON_DNS_USE_ARES_DNS_RECORD
+static void dns_render_arespec(const unsigned char *abuf, int alen, dns_resp_t *response);
+static void dns_render_rr_arespec(const ares_dns_rr_t *rr, dns_resp_t *response);
+#else
+static void dns_render_legacy(const unsigned char *abuf, int alen, dns_resp_t *response);
 static const unsigned char *display_question(const unsigned char *aptr,
 					     const unsigned char *abuf, int alen,
 					     dns_resp_t *response);
 static const unsigned char *display_rr(const unsigned char *aptr,
 				       const unsigned char *abuf, int alen,
 				       dns_resp_t *response);
-static const char *type_name(int type);
-static const char *class_name(int dnsclass);
+#endif
 
 struct nv {
   const char *name;
@@ -124,7 +183,13 @@ static const struct nv types[] = {
   { "AXFR",	T_AXFR },
   { "MAILB",	T_MAILB },
   { "MAILA",	T_MAILA },
-  { "ANY",	T_ANY }
+  { "ANY",	T_ANY },
+  { "DS",	T_DS },
+  { "DNSKEY",	T_DNSKEY },
+  { "TLSA",	T_TLSA },
+  { "SVCB",	T_SVCB },
+  { "HTTPS",	T_HTTPS },
+  { "CAA",	T_CAA }
 };
 static const int ntypes = sizeof(types) / sizeof(types[0]);
 
@@ -143,9 +208,6 @@ static const char *rcodes[] = {
 
 void dns_detail_callback(void *arg, int status, int timeouts, unsigned char *abuf, int alen)
 {
-	int id, qr, opcode, aa, tc, rd, ra, rcode;
-	unsigned int qdcount, ancount, nscount, arcount, i;
-	const unsigned char *aptr;
 	dns_resp_t *response = (dns_resp_t *) arg;
 
 	clearstrbuffer(response->msgbuf);
@@ -210,6 +272,20 @@ void dns_detail_callback(void *arg, int status, int timeouts, unsigned char *abu
 
 	/* Won't happen, but check anyway, for safety. */
 	if (alen < HFIXEDSZ) return;
+
+#ifdef XYMON_DNS_USE_ARES_DNS_RECORD
+	dns_render_arespec(abuf, alen, response);
+#else
+	dns_render_legacy(abuf, alen, response);
+#endif
+}
+
+#ifndef XYMON_DNS_USE_ARES_DNS_RECORD
+static void dns_render_legacy(const unsigned char *abuf, int alen, dns_resp_t *response)
+{
+	int id, qr, opcode, aa, tc, rd, ra, rcode;
+	unsigned int qdcount, ancount, nscount, arcount, i;
+	const unsigned char *aptr;
 
 	/* Parse the answer header. */
 	id = DNS_HEADER_QID(abuf);
@@ -508,6 +584,301 @@ static const unsigned char *display_rr(const unsigned char *aptr,
 
 	return aptr + dlen;
 }
+#endif /* !XYMON_DNS_USE_ARES_DNS_RECORD */
+
+#ifdef XYMON_DNS_USE_ARES_DNS_RECORD
+/*
+ * Structured-record renderer (c-ares >= 1.32). Produces the same text
+ * output as the legacy adig-derived parser above for the record types it
+ * shares with it, but reads fields via ares_dns_parse()/ares_dns_record_t
+ * accessors instead of hand-parsing the wire format. It additionally
+ * decodes CAA, TLSA, and SVCB/HTTPS (issue #235), which the legacy parser
+ * never supported at all. Types c-ares has no dedicated field parser for
+ * (e.g. DS/DNSKEY on this c-ares version, or the pre-1987
+ * MB/MD/MF/MG/MR/MINFO types, and WKS which the legacy parser never
+ * rendered either) come back wrapped as ARES_REC_TYPE_RAW_RR and are shown
+ * as a hex dump rather than fully decoded.
+ */
+static void dns_render_arespec(const unsigned char *abuf, int alen, dns_resp_t *response)
+{
+	ares_dns_record_t *dnsrec = NULL;
+	unsigned short flags;
+	int opcode, rcode;
+	size_t qcnt, ancnt, nscnt, arcnt, i;
+
+	if (ares_dns_parse(abuf, (size_t)alen, 0, &dnsrec) != ARES_SUCCESS) return;
+
+	flags = ares_dns_record_get_flags(dnsrec);
+	opcode = (int)ares_dns_record_get_opcode(dnsrec);
+	rcode = (int)ares_dns_record_get_rcode(dnsrec);
+
+	/* Display the answer header. */
+	snprintf(msg, sizeof(msg), "id: %d\n", ares_dns_record_get_id(dnsrec));
+	addtobuffer(response->msgbuf, msg);
+	snprintf(msg, sizeof(msg), "flags: %s%s%s%s%s\n",
+		(flags & ARES_FLAG_QR) ? "qr " : "",
+		(flags & ARES_FLAG_AA) ? "aa " : "",
+		(flags & ARES_FLAG_TC) ? "tc " : "",
+		(flags & ARES_FLAG_RD) ? "rd " : "",
+		(flags & ARES_FLAG_RA) ? "ra " : "");
+	addtobuffer(response->msgbuf, msg);
+	/* Extended (EDNS/TSIG) op/rcodes can exceed the legacy tables' bounds. */
+	snprintf(msg, sizeof(msg), "opcode: %s\n",
+		((opcode >= 0) && (opcode < (int)(sizeof(opcodes) / sizeof(opcodes[0])))) ? opcodes[opcode] : "(unknown)");
+	addtobuffer(response->msgbuf, msg);
+	snprintf(msg, sizeof(msg), "rcode: %s\n",
+		((rcode >= 0) && (rcode < (int)(sizeof(rcodes) / sizeof(rcodes[0])))) ? rcodes[rcode] : "(unknown)");
+	addtobuffer(response->msgbuf, msg);
+
+
+	/* Display the questions. */
+	addtobuffer(response->msgbuf, "Questions:\n");
+	qcnt = ares_dns_record_query_cnt(dnsrec);
+	for (i = 0; i < qcnt; i++) {
+		const char *qname = NULL;
+		ares_dns_rec_type_t qtype = 0;
+		ares_dns_class_t qclass = 0;
+
+		if (ares_dns_record_query_get(dnsrec, i, &qname, &qtype, &qclass) != ARES_SUCCESS) continue;
+
+		snprintf(msg, sizeof(msg), "\t%-15s.\t", (qname ? qname : ""));
+		addtobuffer(response->msgbuf, msg);
+		if ((int)qclass != C_IN) {
+			snprintf(msg, sizeof(msg), "\t%s", class_name((int)qclass));
+			addtobuffer(response->msgbuf, msg);
+		}
+		snprintf(msg, sizeof(msg), "\t%s\n", type_name((int)qtype));
+		addtobuffer(response->msgbuf, msg);
+	}
+
+	ancnt = ares_dns_record_rr_cnt(dnsrec, ARES_SECTION_ANSWER);
+	nscnt = ares_dns_record_rr_cnt(dnsrec, ARES_SECTION_AUTHORITY);
+	arcnt = ares_dns_record_rr_cnt(dnsrec, ARES_SECTION_ADDITIONAL);
+
+	/* Display the answers. */
+	addtobuffer(response->msgbuf, "Answers:\n");
+	for (i = 0; i < ancnt; i++) {
+		dns_render_rr_arespec(ares_dns_record_rr_get_const(dnsrec, ARES_SECTION_ANSWER, i), response);
+	}
+
+	/* Display the NS records. */
+	addtobuffer(response->msgbuf, "NS records:\n");
+	for (i = 0; i < nscnt; i++) {
+		dns_render_rr_arespec(ares_dns_record_rr_get_const(dnsrec, ARES_SECTION_AUTHORITY, i), response);
+	}
+
+	/* Display the additional records. */
+	addtobuffer(response->msgbuf, "Additional records:\n");
+	for (i = 0; i < arcnt; i++) {
+		dns_render_rr_arespec(ares_dns_record_rr_get_const(dnsrec, ARES_SECTION_ADDITIONAL, i), response);
+	}
+
+	ares_dns_record_destroy(dnsrec);
+}
+
+static void dns_render_rr_arespec(const ares_dns_rr_t *rr, dns_resp_t *response)
+{
+	int type, dnsclass, displaytype;
+	const char *name;
+
+	if (rr == NULL) return;
+
+	name = ares_dns_rr_get_name(rr);
+	type = (int)ares_dns_rr_get_type(rr);
+	dnsclass = (int)ares_dns_rr_get_class(rr);
+	/*
+	 * RAW_RR is c-ares's "I don't have a dedicated parser for this type"
+	 * wrapper (e.g. DS/DNSKEY on this c-ares version); the real wire type
+	 * number is available separately so the header can still show the
+	 * correct type name instead of "(unknown)".
+	 */
+	displaytype = (type == ARES_REC_TYPE_RAW_RR) ? (int)ares_dns_rr_get_u16(rr, ARES_RR_RAW_RR_TYPE) : type;
+
+	snprintf(msg, sizeof(msg), "\t%-15s.\t%d", (name ? name : ""), ares_dns_rr_get_ttl(rr));
+	addtobuffer(response->msgbuf, msg);
+	if (dnsclass != C_IN) {
+		snprintf(msg, sizeof(msg), "\t%s", class_name(dnsclass));
+		addtobuffer(response->msgbuf, msg);
+	}
+	snprintf(msg, sizeof(msg), "\t%s", type_name(displaytype));
+	addtobuffer(response->msgbuf, msg);
+
+	switch (type) {
+	  case ARES_REC_TYPE_CNAME:
+		snprintf(msg, sizeof(msg), "\t%s.", ares_dns_rr_get_str(rr, ARES_RR_CNAME_CNAME));
+		addtobuffer(response->msgbuf, msg);
+		break;
+
+	  case ARES_REC_TYPE_NS:
+		snprintf(msg, sizeof(msg), "\t%s.", ares_dns_rr_get_str(rr, ARES_RR_NS_NSDNAME));
+		addtobuffer(response->msgbuf, msg);
+		break;
+
+	  case ARES_REC_TYPE_PTR:
+		snprintf(msg, sizeof(msg), "\t%s.", ares_dns_rr_get_str(rr, ARES_RR_PTR_DNAME));
+		addtobuffer(response->msgbuf, msg);
+		break;
+
+	  case ARES_REC_TYPE_HINFO:
+		snprintf(msg, sizeof(msg), "\t%s", ares_dns_rr_get_str(rr, ARES_RR_HINFO_CPU));
+		addtobuffer(response->msgbuf, msg);
+		snprintf(msg, sizeof(msg), "\t%s", ares_dns_rr_get_str(rr, ARES_RR_HINFO_OS));
+		addtobuffer(response->msgbuf, msg);
+		break;
+
+	  case ARES_REC_TYPE_MX:
+		snprintf(msg, sizeof(msg), "\t%d", ares_dns_rr_get_u16(rr, ARES_RR_MX_PREFERENCE));
+		addtobuffer(response->msgbuf, msg);
+		snprintf(msg, sizeof(msg), "\t%s.", ares_dns_rr_get_str(rr, ARES_RR_MX_EXCHANGE));
+		addtobuffer(response->msgbuf, msg);
+		break;
+
+	  case ARES_REC_TYPE_SOA:
+		snprintf(msg, sizeof(msg), "\t%s.\n", ares_dns_rr_get_str(rr, ARES_RR_SOA_MNAME));
+		addtobuffer(response->msgbuf, msg);
+		snprintf(msg, sizeof(msg), "\t\t\t\t\t\t%s.\n", ares_dns_rr_get_str(rr, ARES_RR_SOA_RNAME));
+		addtobuffer(response->msgbuf, msg);
+		snprintf(msg, sizeof(msg), "\t\t\t\t\t\t( %d %d %d %d %d )",
+			(int)ares_dns_rr_get_u32(rr, ARES_RR_SOA_SERIAL),
+			(int)ares_dns_rr_get_u32(rr, ARES_RR_SOA_REFRESH),
+			(int)ares_dns_rr_get_u32(rr, ARES_RR_SOA_RETRY),
+			(int)ares_dns_rr_get_u32(rr, ARES_RR_SOA_EXPIRE),
+			(int)ares_dns_rr_get_u32(rr, ARES_RR_SOA_MINIMUM));
+		addtobuffer(response->msgbuf, msg);
+		break;
+
+	  case ARES_REC_TYPE_TXT:
+	  {
+		size_t cnt = ares_dns_rr_get_abin_cnt(rr, ARES_RR_TXT_DATA);
+		size_t j;
+		for (j = 0; j < cnt; j++) {
+			size_t len = 0;
+			const unsigned char *data = ares_dns_rr_get_abin(rr, ARES_RR_TXT_DATA, j, &len);
+			snprintf(msg, sizeof(msg), "\t%.*s", (int)len, (data ? (const char *)data : ""));
+			addtobuffer(response->msgbuf, msg);
+		}
+		break;
+	  }
+
+	  case ARES_REC_TYPE_A:
+	  {
+		const struct in_addr *addr = ares_dns_rr_get_addr(rr, ARES_RR_A_ADDR);
+		if (addr) {
+			snprintf(msg, sizeof(msg), "\t%s", inet_ntoa(*addr));
+			addtobuffer(response->msgbuf, msg);
+		}
+		break;
+	  }
+
+	  case ARES_REC_TYPE_AAAA:
+	  {
+		const struct ares_in6_addr *addr6 = ares_dns_rr_get_addr6(rr, ARES_RR_AAAA_ADDR);
+		if (addr6) {
+			struct in6_addr localaddr6;
+			memcpy(&localaddr6, addr6, sizeof(localaddr6));
+			addtobuffer_many(response->msgbuf, "\t", inet_ntop(AF_INET6, &localaddr6, msg, sizeof(msg)), NULL);
+		}
+		break;
+	  }
+
+	  case ARES_REC_TYPE_SRV:
+		snprintf(msg, sizeof(msg), "\t%d", ares_dns_rr_get_u16(rr, ARES_RR_SRV_PRIORITY));
+		addtobuffer(response->msgbuf, msg);
+		snprintf(msg, sizeof(msg), " %d", ares_dns_rr_get_u16(rr, ARES_RR_SRV_WEIGHT));
+		addtobuffer(response->msgbuf, msg);
+		snprintf(msg, sizeof(msg), " %d", ares_dns_rr_get_u16(rr, ARES_RR_SRV_PORT));
+		addtobuffer(response->msgbuf, msg);
+		snprintf(msg, sizeof(msg), "\t%s.", ares_dns_rr_get_str(rr, ARES_RR_SRV_TARGET));
+		addtobuffer(response->msgbuf, msg);
+		break;
+
+	  case ARES_REC_TYPE_CAA:
+	  {
+		size_t vlen = 0;
+		const unsigned char *val = ares_dns_rr_get_bin(rr, ARES_RR_CAA_VALUE, &vlen);
+		snprintf(msg, sizeof(msg), "\t%d %s \"%.*s\"",
+			ares_dns_rr_get_u8(rr, ARES_RR_CAA_CRITICAL),
+			ares_dns_rr_get_str(rr, ARES_RR_CAA_TAG),
+			(int)vlen, (val ? (const char *)val : ""));
+		addtobuffer(response->msgbuf, msg);
+		break;
+	  }
+
+	  case ARES_REC_TYPE_TLSA:
+	  {
+		size_t dlen = 0;
+		const unsigned char *data = ares_dns_rr_get_bin(rr, ARES_RR_TLSA_DATA, &dlen);
+		size_t j;
+		snprintf(msg, sizeof(msg), "\t%d %d %d ",
+			ares_dns_rr_get_u8(rr, ARES_RR_TLSA_CERT_USAGE),
+			ares_dns_rr_get_u8(rr, ARES_RR_TLSA_SELECTOR),
+			ares_dns_rr_get_u8(rr, ARES_RR_TLSA_MATCH));
+		addtobuffer(response->msgbuf, msg);
+		for (j = 0; (data != NULL) && (j < dlen); j++) {
+			snprintf(msg, sizeof(msg), "%02x", data[j]);
+			addtobuffer(response->msgbuf, msg);
+		}
+		break;
+	  }
+
+	  case ARES_REC_TYPE_SVCB:
+	  case ARES_REC_TYPE_HTTPS:
+	  {
+		ares_dns_rr_key_t prikey = (type == ARES_REC_TYPE_SVCB) ? ARES_RR_SVCB_PRIORITY : ARES_RR_HTTPS_PRIORITY;
+		ares_dns_rr_key_t tgtkey = (type == ARES_REC_TYPE_SVCB) ? ARES_RR_SVCB_TARGET : ARES_RR_HTTPS_TARGET;
+		ares_dns_rr_key_t prmkey = (type == ARES_REC_TYPE_SVCB) ? ARES_RR_SVCB_PARAMS : ARES_RR_HTTPS_PARAMS;
+		size_t ocnt = ares_dns_rr_get_opt_cnt(rr, prmkey);
+		size_t j;
+
+		snprintf(msg, sizeof(msg), "\t%d\t%s.", ares_dns_rr_get_u16(rr, prikey), ares_dns_rr_get_str(rr, tgtkey));
+		addtobuffer(response->msgbuf, msg);
+		for (j = 0; j < ocnt; j++) {
+			const unsigned char *oval = NULL;
+			size_t olen = 0;
+			unsigned short okey = ares_dns_rr_get_opt(rr, prmkey, j, &oval, &olen);
+			const char *oname = ares_dns_opt_get_name(prmkey, okey);
+			size_t k;
+
+			if (oname) snprintf(msg, sizeof(msg), " %s", oname);
+			else       snprintf(msg, sizeof(msg), " key%u", okey);
+			addtobuffer(response->msgbuf, msg);
+			if (olen > 0) {
+				addtobuffer(response->msgbuf, "=");
+				for (k = 0; (oval != NULL) && (k < olen); k++) {
+					snprintf(msg, sizeof(msg), "%02x", oval[k]);
+					addtobuffer(response->msgbuf, msg);
+				}
+			}
+		}
+		break;
+	  }
+
+	  case ARES_REC_TYPE_RAW_RR:
+	  {
+		/* c-ares has no dedicated field parser for this wire type (e.g.
+		 * DS/DNSKEY on this c-ares version); render the raw bytes as hex
+		 * rather than a blank "cannot parse" -- displaytype above already
+		 * showed the real type name/number in the header. */
+		size_t rlen = 0;
+		const unsigned char *rdata = ares_dns_rr_get_bin(rr, ARES_RR_RAW_RR_DATA, &rlen);
+		size_t j;
+		addtobuffer(response->msgbuf, "\t[");
+		for (j = 0; (rdata != NULL) && (j < rlen); j++) {
+			snprintf(msg, sizeof(msg), "%02x", rdata[j]);
+			addtobuffer(response->msgbuf, msg);
+		}
+		addtobuffer(response->msgbuf, "]");
+		break;
+	  }
+
+	  default:
+		snprintf(msg, sizeof(msg), "\t[Unknown RR; cannot parse]");
+		addtobuffer(response->msgbuf, msg);
+	}
+	snprintf(msg, sizeof(msg), "\n");
+	addtobuffer(response->msgbuf, msg);
+}
+#endif /* XYMON_DNS_USE_ARES_DNS_RECORD */
 
 static const char *type_name(int type)
 {
@@ -538,4 +909,373 @@ int dns_name_type(char *name)
 	}
 	return T_A;
 }
+
+/*
+ * RFC 1982 serial number arithmetic (issue #235 cross-NS consistency check).
+ * SOA serials are a 32-bit circular sequence space, not plain integers: they
+ * are expected to eventually wrap from 4294967295 back to 0, so a naive
+ * "candidate < reference" comparison gives the wrong answer near that
+ * wraparound (e.g. candidate=4294967290, reference=5 is really 11 steps
+ * *ahead*, not "way behind"). This computes the comparison the way the RFC
+ * specifies: subtract as unsigned 32-bit, then reinterpret the bit pattern
+ * as signed 32-bit.
+ *
+ * Returns true if "candidate" is a serial-order predecessor of "reference"
+ * (i.e. a nameserver reporting "candidate" just hasn't caught up to
+ * "reference" yet - the common in-progress-AXFR / not-yet-refreshed case,
+ * not a genuine inconsistency). Returns false if reference==candidate
+ * (exact match - handled separately by the caller), if candidate is
+ * serial-order *ahead* of reference, or if they are exactly 2^31 apart (the
+ * one case RFC 1982 leaves undefined) - all of which should be escalated
+ * for content comparison rather than silently accepted as normal lag.
+ */
+int dns_soa_is_predecessor(unsigned int candidate, unsigned int reference)
+{
+	return (int)(reference - candidate) > 0;
+}
+
+#ifdef XYMON_DNS_USE_ARES_DNS_RECORD
+/*
+ * Cross-NS content comparison (issue #235). Independent of
+ * dns_render_rr_arespec() (which is display-formatted for the visible test
+ * banner) so this comparison logic can evolve without risking a regression
+ * in the already-shipped display output, and vice versa.
+ *
+ * dns_rr_normalize_key() builds a canonical "name|class|type|rdata..." key
+ * for one RR, deliberately excluding the TTL (TTLs legitimately differ
+ * between nameservers as they count down independently) so two RRs with
+ * identical data but different remaining TTLs still compare equal.
+ *
+ * If blank_soa_serial is set, an SOA record's serial number is rendered as
+ * a fixed placeholder ("*") instead of its real value. This lets the
+ * caller run the comparison twice: once normally (fast path - byte
+ * identical responses match trivially), and if that fails, once with the
+ * serial blanked - if that second pass matches, the two nameservers agree
+ * on everything except the serial, which is exactly the "hasn't refreshed
+ * yet" case dns_soa_is_predecessor() is meant to classify, rather than a
+ * genuine content divergence.
+ */
+static void dns_rr_normalize_key(const ares_dns_rr_t *rr, char *buf, size_t buflen, int blank_soa_serial)
+{
+	int type, dnsclass;
+	const char *name;
+	char tmp[1024];
+
+	if (rr == NULL) { if (buflen) buf[0] = '\0'; return; }
+
+	name = ares_dns_rr_get_name(rr);
+	type = (int)ares_dns_rr_get_type(rr);
+	dnsclass = (int)ares_dns_rr_get_class(rr);
+
+	snprintf(buf, buflen, "%s|%d|%d|", (name ? name : ""), dnsclass, type);
+	tmp[0] = '\0';
+
+	switch (type) {
+	  case ARES_REC_TYPE_CNAME:
+		snprintf(tmp, sizeof(tmp), "%s", ares_dns_rr_get_str(rr, ARES_RR_CNAME_CNAME));
+		break;
+
+	  case ARES_REC_TYPE_NS:
+		snprintf(tmp, sizeof(tmp), "%s", ares_dns_rr_get_str(rr, ARES_RR_NS_NSDNAME));
+		break;
+
+	  case ARES_REC_TYPE_PTR:
+		snprintf(tmp, sizeof(tmp), "%s", ares_dns_rr_get_str(rr, ARES_RR_PTR_DNAME));
+		break;
+
+	  case ARES_REC_TYPE_HINFO:
+		snprintf(tmp, sizeof(tmp), "%s|%s",
+			ares_dns_rr_get_str(rr, ARES_RR_HINFO_CPU), ares_dns_rr_get_str(rr, ARES_RR_HINFO_OS));
+		break;
+
+	  case ARES_REC_TYPE_MX:
+		snprintf(tmp, sizeof(tmp), "%u|%s",
+			ares_dns_rr_get_u16(rr, ARES_RR_MX_PREFERENCE), ares_dns_rr_get_str(rr, ARES_RR_MX_EXCHANGE));
+		break;
+
+	  case ARES_REC_TYPE_SOA:
+		if (blank_soa_serial) {
+			snprintf(tmp, sizeof(tmp), "%s|%s|*|%u|%u|%u|%u",
+				ares_dns_rr_get_str(rr, ARES_RR_SOA_MNAME), ares_dns_rr_get_str(rr, ARES_RR_SOA_RNAME),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_REFRESH), ares_dns_rr_get_u32(rr, ARES_RR_SOA_RETRY),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_EXPIRE), ares_dns_rr_get_u32(rr, ARES_RR_SOA_MINIMUM));
+		} else {
+			snprintf(tmp, sizeof(tmp), "%s|%s|%u|%u|%u|%u|%u",
+				ares_dns_rr_get_str(rr, ARES_RR_SOA_MNAME), ares_dns_rr_get_str(rr, ARES_RR_SOA_RNAME),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_SERIAL), ares_dns_rr_get_u32(rr, ARES_RR_SOA_REFRESH),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_RETRY), ares_dns_rr_get_u32(rr, ARES_RR_SOA_EXPIRE),
+				ares_dns_rr_get_u32(rr, ARES_RR_SOA_MINIMUM));
+		}
+		break;
+
+	  case ARES_REC_TYPE_TXT:
+	  {
+		size_t cnt = ares_dns_rr_get_abin_cnt(rr, ARES_RR_TXT_DATA);
+		size_t j, off = 0;
+		for (j = 0; j < cnt; j++) {
+			size_t len = 0;
+			const unsigned char *data = ares_dns_rr_get_abin(rr, ARES_RR_TXT_DATA, j, &len);
+			if (off < sizeof(tmp))
+				off += (size_t)snprintf(tmp + off, sizeof(tmp) - off, "%.*s|", (int)len, (data ? (const char *)data : ""));
+		}
+		break;
+	  }
+
+	  case ARES_REC_TYPE_A:
+	  {
+		const struct in_addr *addr = ares_dns_rr_get_addr(rr, ARES_RR_A_ADDR);
+		if (addr) snprintf(tmp, sizeof(tmp), "%s", inet_ntoa(*addr));
+		break;
+	  }
+
+	  case ARES_REC_TYPE_AAAA:
+	  {
+		const struct ares_in6_addr *addr6 = ares_dns_rr_get_addr6(rr, ARES_RR_AAAA_ADDR);
+		if (addr6) {
+			struct in6_addr localaddr6;
+			char abuf[64];
+			memcpy(&localaddr6, addr6, sizeof(localaddr6));
+			inet_ntop(AF_INET6, &localaddr6, abuf, sizeof(abuf));
+			snprintf(tmp, sizeof(tmp), "%s", abuf);
+		}
+		break;
+	  }
+
+	  case ARES_REC_TYPE_SRV:
+		snprintf(tmp, sizeof(tmp), "%u|%u|%u|%s",
+			ares_dns_rr_get_u16(rr, ARES_RR_SRV_PRIORITY), ares_dns_rr_get_u16(rr, ARES_RR_SRV_WEIGHT),
+			ares_dns_rr_get_u16(rr, ARES_RR_SRV_PORT), ares_dns_rr_get_str(rr, ARES_RR_SRV_TARGET));
+		break;
+
+	  default:
+		/* Other/unsupported types: name|class|type above is already a
+		 * reasonable (if coarse) comparison key on its own. */
+		break;
+	}
+
+	strncat(buf, tmp, (buflen > strlen(buf)) ? (buflen - strlen(buf) - 1) : 0);
+}
+
+static int dns_strcmp_qsort(const void *a, const void *b)
+{
+	char * const *sa = (char * const *)a;
+	char * const *sb = (char * const *)b;
+	return strcmp(*sa, *sb);
+}
+
+/*
+ * Build a normalized, order-independent representation of one section of a
+ * parsed DNS response (sorted, newline-joined per-RR keys), for content
+ * comparison across nameservers. Caller must xfree() the returned buffer.
+ */
+char *dns_section_normalize(ares_dns_record_t *dnsrec, ares_dns_section_t sect, int blank_soa_serial)
+{
+	size_t cnt = ares_dns_record_rr_cnt(dnsrec, sect);
+	char **keys;
+	size_t i, total = 1;
+	char *out;
+
+	if (cnt == 0) return strdup("");
+
+	keys = (char **)calloc(cnt, sizeof(char *));
+	if (keys == NULL) return strdup("");
+
+	for (i = 0; i < cnt; i++) {
+		char kbuf[1024];
+		dns_rr_normalize_key(ares_dns_record_rr_get_const(dnsrec, sect, i), kbuf, sizeof(kbuf), blank_soa_serial);
+		keys[i] = strdup(kbuf);
+		total += strlen(keys[i]) + 1;
+	}
+
+	qsort(keys, cnt, sizeof(char *), dns_strcmp_qsort);
+
+	out = (char *)malloc(total);
+	if (out != NULL) {
+		out[0] = '\0';
+		for (i = 0; i < cnt; i++) {
+			strcat(out, keys[i]);
+			strcat(out, "\n");
+		}
+	}
+	for (i = 0; i < cnt; i++) xfree(keys[i]);
+	xfree(keys);
+
+	return (out != NULL) ? out : strdup("");
+}
+
+/*
+ * Compare two parsed DNS responses (from two different nameservers, same
+ * query) for content equality across all three sections, ignoring record
+ * order and TTLs. See dns_rr_normalize_key() for what blank_soa_serial
+ * does. Returns true (non-zero) if equal.
+ */
+int dns_response_content_equal(ares_dns_record_t *a, ares_dns_record_t *b, int blank_soa_serial)
+{
+	static const ares_dns_section_t sects[3] = { ARES_SECTION_ANSWER, ARES_SECTION_AUTHORITY, ARES_SECTION_ADDITIONAL };
+	int i, equal = 1;
+
+	for (i = 0; equal && (i < 3); i++) {
+		char *na = dns_section_normalize(a, sects[i], blank_soa_serial);
+		char *nb = dns_section_normalize(b, sects[i], blank_soa_serial);
+		if (strcmp(na, nb) != 0) equal = 0;
+		xfree(na);
+		xfree(nb);
+	}
+	return equal;
+}
+
+/*
+ * Extract NS hostnames from the ANSWER section of a raw wire-format
+ * response to a T_NS query. Returns a NULL-terminated array of malloc'd
+ * strings (caller frees each entry and the array), or NULL if there are
+ * none (e.g. the queried name isn't a zone apex).
+ */
+char **dns_extract_ns_names(const unsigned char *abuf, int alen)
+{
+	ares_dns_record_t *dnsrec = NULL;
+	size_t cnt, i, n = 0;
+	char **names;
+
+	if (ares_dns_parse(abuf, (size_t)alen, 0, &dnsrec) != ARES_SUCCESS) return NULL;
+
+	cnt = ares_dns_record_rr_cnt(dnsrec, ARES_SECTION_ANSWER);
+	names = (char **)calloc(cnt + 1, sizeof(char *));
+	if (names == NULL) { ares_dns_record_destroy(dnsrec); return NULL; }
+
+	for (i = 0; i < cnt; i++) {
+		const ares_dns_rr_t *rr = ares_dns_record_rr_get_const(dnsrec, ARES_SECTION_ANSWER, i);
+		if (rr && ((int)ares_dns_rr_get_type(rr) == ARES_REC_TYPE_NS)) {
+			const char *ns = ares_dns_rr_get_str(rr, ARES_RR_NS_NSDNAME);
+			if (ns) names[n++] = strdup(ns);
+		}
+	}
+	names[n] = NULL;
+	ares_dns_record_destroy(dnsrec);
+
+	if (n == 0) { xfree(names); return NULL; }
+	return names;
+}
+
+/*
+ * Evaluate cross-NS consistency (issue #235) given raw wire-format
+ * responses already collected from ns_count nameservers, all for the same
+ * atype:name query. The first successfully-parsed response is used as the
+ * reference point; every other response is compared against it via
+ * dns_response_content_equal(). For SOA queries specifically, a response
+ * that differs *only* in its serial is further checked with
+ * dns_soa_is_predecessor(): if one serial is a valid predecessor of the
+ * other, that nameserver is classified as "syncing" (ordinary replication
+ * lag), not a genuine mismatch. Appends a human-readable summary to
+ * 'summary'. Returns true (non-zero) if there is no unexplained
+ * divergence (i.e. every reachable NS either agrees or is merely syncing).
+ */
+int dns_crossns_evaluate(int atype, unsigned char **abufs, int *alens,
+			const char **ns_labels, int ns_count, strbuffer_t *summary)
+{
+	ares_dns_record_t **recs;
+	int i, ref = -1;
+	int agree = 0, syncing = 0, unreachable = 0, disagree = 0;
+	char msg[512];
+
+	recs = (ares_dns_record_t **)calloc((size_t)ns_count, sizeof(ares_dns_record_t *));
+	if (recs == NULL) return 1;
+
+	for (i = 0; i < ns_count; i++) {
+		recs[i] = NULL;
+		if (abufs[i] && (alens[i] > 0)) {
+			if (ares_dns_parse(abufs[i], (size_t)alens[i], 0, &recs[i]) != ARES_SUCCESS) recs[i] = NULL;
+		}
+		if (recs[i] == NULL) unreachable++;
+	}
+
+	for (i = 0; (ref < 0) && (i < ns_count); i++) if (recs[i]) ref = i;
+
+	if (ref >= 0) {
+		agree++; /* the reference trivially agrees with itself */
+		for (i = 0; i < ns_count; i++) {
+			const char *label = (ns_labels && ns_labels[i]) ? ns_labels[i] : "?";
+
+			if ((i == ref) || (recs[i] == NULL)) continue;
+
+			if (dns_response_content_equal(recs[ref], recs[i], 0)) {
+				agree++;
+				continue;
+			}
+
+			if ((atype == T_SOA) && dns_response_content_equal(recs[ref], recs[i], 1)) {
+				/*
+				 * Only the SOA serial differs -- everything else about
+				 * the zone (mname/rname/timers, and every other RR)
+				 * matches exactly. This is reported as informational
+				 * "syncing" rather than a failure: telling "hasn't
+				 * refreshed yet" apart from "permanently diverged
+				 * cluster" (e.g. google.com's independently-numbered NS
+				 * groups) genuinely can't be done from one snapshot --
+				 * RFC1982 serial-order comparison doesn't help here,
+				 * since for any two distinct serials exactly one
+				 * direction is always "ahead", regardless of whether the
+				 * difference is a one-poll lag or a permanent split.
+				 * Distinguishing those reliably needs state persisted
+				 * across poll cycles (does the gap shrink over time?),
+				 * which is a possible future improvement; for now the
+				 * content-equality check above remains the reliable,
+				 * stateless signal for genuine mismatches.
+				 */
+				unsigned int s_ref = 0, s_i = 0;
+				const ares_dns_rr_t *rr;
+
+				if (ares_dns_record_rr_cnt(recs[ref], ARES_SECTION_ANSWER) > 0) {
+					rr = ares_dns_record_rr_get_const(recs[ref], ARES_SECTION_ANSWER, 0);
+					s_ref = ares_dns_rr_get_u32(rr, ARES_RR_SOA_SERIAL);
+				}
+				if (ares_dns_record_rr_cnt(recs[i], ARES_SECTION_ANSWER) > 0) {
+					rr = ares_dns_record_rr_get_const(recs[i], ARES_SECTION_ANSWER, 0);
+					s_i = ares_dns_rr_get_u32(rr, ARES_RR_SOA_SERIAL);
+				}
+
+				syncing++;
+				snprintf(msg, sizeof(msg), "  %s: serial %u differs from %s's %u (syncing)\n",
+					label, s_i, (ns_labels && ns_labels[ref]) ? ns_labels[ref] : "?", s_ref);
+				addtobuffer(summary, msg);
+				continue;
+			}
+
+			disagree++;
+			snprintf(msg, sizeof(msg), "  %s: content disagrees with %s\n",
+				label, (ns_labels && ns_labels[ref]) ? ns_labels[ref] : "?");
+			addtobuffer(summary, msg);
+		}
+	}
+
+	snprintf(msg, sizeof(msg), "\nCross-NS check: %d nameserver%s queried, %d agree, %d syncing, %d unreachable, %d disagree\n",
+		ns_count, (ns_count == 1) ? "" : "s", agree, syncing, unreachable, disagree);
+	addtobuffer(summary, msg);
+
+	for (i = 0; i < ns_count; i++) {
+		if (recs[i] == NULL) {
+			snprintf(msg, sizeof(msg), "  %s: unreachable/no answer\n", (ns_labels && ns_labels[i]) ? ns_labels[i] : "?");
+			addtobuffer(summary, msg);
+		}
+	}
+
+	for (i = 0; i < ns_count; i++) if (recs[i]) ares_dns_record_destroy(recs[i]);
+	xfree(recs);
+
+	return (disagree == 0);
+}
+#else /* !XYMON_DNS_USE_ARES_DNS_RECORD */
+char **dns_extract_ns_names(const unsigned char *abuf, int alen)
+{
+	(void)abuf; (void)alen;
+	return NULL;
+}
+
+int dns_crossns_evaluate(int atype, unsigned char **abufs, int *alens,
+			const char **ns_labels, int ns_count, strbuffer_t *summary)
+{
+	(void)atype; (void)abufs; (void)alens; (void)ns_labels; (void)ns_count; (void)summary;
+	return 1;
+}
+#endif /* XYMON_DNS_USE_ARES_DNS_RECORD */
+
 

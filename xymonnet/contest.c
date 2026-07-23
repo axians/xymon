@@ -1602,7 +1602,7 @@ int main(int argc, char *argv[])
 					strbuffer_t *banner = newstrbuffer(0);
 					int result;
 
-					result = dns_test_server(ip, argp+4, banner);
+					result = dns_test_server(ip, argp+4, NULL, banner);
 					printf("DNS test result=%d\nBanner:%s\n", result, STRBUF(banner));
 				}
 				else {
