@@ -198,6 +198,7 @@ def main():
     tls_listener = None
     tls_context = None
     httpsd = None
+    mtlsd = None
     if len(sys.argv) == 4:
         tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         tls_context.load_cert_chain(sys.argv[2], sys.argv[3])
@@ -205,6 +206,14 @@ def main():
         httpsd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         httpsd.socket = tls_context.wrap_socket(
             httpsd.socket, server_side=True
+        )
+        mtls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        mtls_context.load_cert_chain(sys.argv[2], sys.argv[3])
+        mtls_context.load_verify_locations(sys.argv[2])
+        mtls_context.verify_mode = ssl.CERT_REQUIRED
+        mtlsd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        mtlsd.socket = mtls_context.wrap_socket(
+            mtlsd.socket, server_side=True
         )
 
     dns_socket = None
@@ -221,6 +230,7 @@ def main():
     with open(sys.argv[1], "w", encoding="ascii") as ready:
         tls_port = tls_listener.getsockname()[1] if tls_listener else 0
         https_port = httpsd.server_port if httpsd else 0
+        mtls_port = mtlsd.server_port if mtlsd else 0
         dns_ready = "1" if dns_socket else ""
         ntp_ready = "1" if ntp_socket else ""
         ready.write(
@@ -228,7 +238,7 @@ def main():
             f"{bad_banner_listener.getsockname()[1]} "
             f"{ftp_listener.getsockname()[1]} "
             f"{telnet_listener.getsockname()[1]} {tls_port} {https_port} "
-            f"{dns_ready or '0'} {ntp_ready or '0'}\n"
+            f"{mtls_port} {dns_ready or '0'} {ntp_ready or '0'}\n"
         )
 
     threading.Thread(
@@ -255,6 +265,8 @@ def main():
         ).start()
     if httpsd:
         threading.Thread(target=httpsd.serve_forever, daemon=True).start()
+    if mtlsd:
+        threading.Thread(target=mtlsd.serve_forever, daemon=True).start()
     if dns_socket:
         threading.Thread(
             target=serve_dns, args=(dns_socket,), daemon=True

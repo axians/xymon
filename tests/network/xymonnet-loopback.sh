@@ -19,8 +19,17 @@ assert_file_exists "$fixture"
 assert_file_exists "$protocols"
 
 work=$(mktempdir)
-mkdir -p "$work/runtime/etc" "$work/runtime/tmp" "$work/runtime/data" "$work/runtime/logs"
+mkdir -p "$work/runtime/etc" "$work/runtime/tmp" "$work/runtime/data" \
+	"$work/runtime/logs" "$work/runtime/certs"
 cp "$protocols" "$work/runtime/etc/protocols.cfg"
+cat > "$work/runtime/etc/netrc" <<'EOF'
+machine netrc.test login fixture password password
+EOF
+chmod 600 "$work/runtime/etc/netrc"
+if [[ -n ${XYMONNET_CLIENT_CERT:-} ]]; then
+	cp "$XYMONNET_CLIENT_CERT" "$work/runtime/certs/client.pem"
+	chmod 600 "$work/runtime/certs/client.pem"
+fi
 
 ready="$work/fixture.ports"
 fixture_command=(python3 "$fixture" "$ready")
@@ -39,7 +48,8 @@ for ((attempt = 0; attempt < 10000; attempt++)); do
 	}
 done
 [[ -s $ready ]] || fail "loopback fixture did not become ready"
-read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port https_port dns_ready ntp_ready < "$ready"
+read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
+	https_port mtls_port dns_ready ntp_ready < "$ready"
 
 {
 	printf '%s' '127.0.0.1 valgrind.test #'
@@ -48,6 +58,8 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port https_p
 	printf ' http=redirect;http://127.0.0.1:%s/redirect' "$http_port"
 	printf ' http=authok;http://fixture:password@127.0.0.1:%s/auth' "$http_port"
 	printf ' http=authbad;http://fixture:wrong@127.0.0.1:%s/auth' "$http_port"
+	printf ' http=netrcok;http://netrc.test:%s=127.0.0.1/auth' "$http_port"
+	printf ' http=netrcbad;http://missing-netrc.test:%s=127.0.0.1/auth' "$http_port"
 	printf ' httphead=headok;http://127.0.0.1:%s/good' "$http_port"
 	printf ' httphead=headbad;http://127.0.0.1:%s/missing' "$http_port"
 	printf ' httpstatus=statusok;http://127.0.0.1:%s/good;2..;4..' "$http_port"
@@ -86,6 +98,10 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port https_p
 	fi
 	if [[ $https_port != 0 ]]; then
 		printf ' http=httpsok;https://127.0.0.1:%s/good' "$https_port"
+	fi
+	if [[ $mtls_port != 0 ]]; then
+		printf ' http=certauthok;https://CERT:client.pem@127.0.0.1:%s/good' "$mtls_port"
+		printf ' http=certauthbad;https://127.0.0.1:%s/good' "$mtls_port"
 	fi
 	printf '\n'
 	printf '127.0.0.1 bannerbad.test # noconn ssh:%s\n' "$bad_banner_port"
@@ -139,6 +155,8 @@ for expected in \
 	'valgrind,test.redirect green' \
 	'valgrind,test.authok green' \
 	'valgrind,test.authbad red' \
+	'valgrind,test.netrcok green' \
+	'valgrind,test.netrcbad red' \
 	'valgrind,test.headok green' \
 	'valgrind,test.headbad red' \
 	'valgrind,test.statusok green' \
@@ -202,6 +220,19 @@ if [[ $https_port != 0 ]]; then
 		cat "$work/xymonnet.err" >&2
 		fail "missing successful HTTPS result"
 	}
+fi
+
+if [[ $mtls_port != 0 ]]; then
+	for certauth_expected in \
+		'valgrind,test.certauthok green' \
+		'valgrind,test.certauthbad red'
+	do
+		grep -Fq "$certauth_expected" "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			cat "$work/xymonnet.err" >&2
+			fail "missing client-certificate result: $certauth_expected"
+		}
+	done
 fi
 
 if [[ $ntp_ready = 1 ]]; then

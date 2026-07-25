@@ -14,6 +14,17 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
 	>/dev/null 2>&1
 chmod 600 "$ldap_root/server.key"
 
+openssl req -newkey rsa:2048 -nodes -subj '/CN=xymonnet-client' \
+	-keyout "$ldap_root/client.key" -out "$ldap_root/client.csr" \
+	>/dev/null 2>&1
+printf '%s\n' 'extendedKeyUsage=clientAuth' > "$ldap_root/client.ext"
+openssl x509 -req -days 365 -in "$ldap_root/client.csr" \
+	-CA "$ldap_root/server.crt" -CAkey "$ldap_root/server.key" -CAcreateserial \
+	-extfile "$ldap_root/client.ext" -out "$ldap_root/client.crt" \
+	>/dev/null 2>&1
+cat "$ldap_root/client.crt" "$ldap_root/client.key" > "$ldap_root/client.pem"
+chmod 600 "$ldap_root/client.key" "$ldap_root/client.pem"
+
 cat > "$ldap_root/slapd.conf" <<EOF
 include /etc/ldap/schema/core.schema
 include /etc/ldap/schema/cosine.schema
@@ -80,3 +91,4 @@ export LDAPTLS_REQCERT=never
 export XYMONNET_LDAP_PORT=$ldap_port
 export XYMONNET_TLS_CERT=$ldap_root/server.crt
 export XYMONNET_TLS_KEY=$ldap_root/server.key
+export XYMONNET_CLIENT_CERT=$ldap_root/client.pem
