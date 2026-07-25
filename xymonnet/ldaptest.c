@@ -219,6 +219,7 @@ void run_ldap_tests(service_t *ldaptest, int sslcertcheck, int querytimeout)
 					req->output = strdup(ldap_err2string(rc));
 					req->ldapstatus = XYMON_LDAP_TLSFAIL;
 				}
+				ldap_unbind(ld);
 				continue;
 			}
 		}
@@ -230,6 +231,7 @@ void run_ldap_tests(service_t *ldaptest, int sslcertcheck, int querytimeout)
 				dbgprintf("ldap_start_tls failed\n");
 				req->output = strdup(ldap_err2string(rc));
 				req->ldapstatus = XYMON_LDAP_TLSFAIL;
+				ldap_unbind(ld);
 				continue;
 			}
 		}
@@ -247,6 +249,7 @@ void run_ldap_tests(service_t *ldaptest, int sslcertcheck, int querytimeout)
 		if (connect_timeout || (msgID == -1)) {
 			req->ldapstatus = XYMON_LDAP_BINDFAIL;
 			req->output = "Cannot connect to server";
+			ldap_unbind(ld);
 			continue;
 		}
 
@@ -309,12 +312,14 @@ void run_ldap_tests(service_t *ldaptest, int sslcertcheck, int querytimeout)
 		if(rc == LDAP_TIMEOUT) {
 			req->ldapstatus = XYMON_LDAP_TIMEOUT;
 			req->output = strdup(ldap_err2string(rc));
+			if (result) ldap_msgfree(result);
 	  		ldap_unbind(ld);
 			continue;
 		}
 		if( rc != LDAP_SUCCESS ) {
 			req->ldapstatus = XYMON_LDAP_SEARCHFAILED;
 			req->output = strdup(ldap_err2string(rc));
+			if (result) ldap_msgfree(result);
 	  		ldap_unbind(ld);
 			continue;
 		}

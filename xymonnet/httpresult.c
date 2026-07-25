@@ -429,9 +429,9 @@ void send_content_results(service_t *httptest, testedhost_t *host,
 	SBUF_DEFINE(conttest);
 	int 	contentnum = 0;
 
-	SBUF_MALLOC(conttest, 128);
-
 	if (host->firsthttp == NULL) return;
+
+	SBUF_MALLOC(conttest, 128);
 
 	/* Check if this service is a NOPAGENET service. */
 	SBUF_MALLOC(nopagename, strlen(contenttestname)+3);
