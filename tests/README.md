@@ -31,7 +31,7 @@ For a reproducible Ubuntu build and Memcheck run, use the opt-in Podman
 launcher. It copies the read-only source mount into the container before
 configuring and building, so it does not modify the checkout. The container
 also starts OpenLDAP, DNS, NTP, HTTP(S), TCP, TLS, and telnet fixtures. The
-loopback matrix covers 52 probes, including authenticated LDAP searches,
+loopback matrix covers 54 probes, including authenticated LDAP searches,
 LDAPv3 STARTTLS, HTTP authentication and redirects, strict TCP response
 checking, telnet negotiation, and positive, dial-up, and reverse ping checks.
 Green behaviors are paired with deterministic failure paths:

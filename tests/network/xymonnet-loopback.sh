@@ -64,6 +64,8 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port https_p
 	printf ' nopost=nopostbad;http://127.0.0.1:%s/form;alpha=one;received:alpha=one' "$http_port"
 	printf ' soap=soapok;http://127.0.0.1:%s/soap;<request/>;soap-ok' "$http_port"
 	printf ' soap=soapbad;http://127.0.0.1:%s/soap;<request/>;missing' "$http_port"
+	printf ' nosoap=nosoapok;http://127.0.0.1:%s/soap;<request/>;missing' "$http_port"
+	printf ' nosoap=nosoapbad;http://127.0.0.1:%s/soap;<request/>;soap-ok' "$http_port"
 	printf ' apache=http://127.0.0.1:%s/server-status?auto' "$http_port"
 	if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		printf ' ldap://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
@@ -153,6 +155,8 @@ for expected in \
 	'valgrind,test.nopostbad red' \
 	'valgrind,test.soapok green' \
 	'valgrind,test.soapbad red' \
+	'valgrind,test.nosoapok green' \
+	'valgrind,test.nosoapbad red' \
 	'data valgrind,test.apache' \
 	'valgrind,test.ssh green' \
 	'valgrind,test.qmtp green' \
