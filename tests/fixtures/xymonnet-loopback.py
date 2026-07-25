@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import socket
+import ssl
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,7 +21,10 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def do_HEAD(self):
-        self.send_fixture()
+        if self.path == "/missing":
+            self.send_fixture(404, b"not found\n")
+        else:
+            self.send_fixture()
 
     def do_GET(self):
         if self.path == "/missing":
@@ -51,20 +55,46 @@ def serve_ssh(listener):
             connection.recv(1024)
 
 
+def serve_ftps(listener, context):
+    while True:
+        connection, _ = listener.accept()
+        try:
+            with context.wrap_socket(connection, server_side=True) as tls_connection:
+                tls_connection.sendall(b"220 xymon TLS fixture\r\n")
+                tls_connection.recv(1024)
+        except ssl.SSLError:
+            connection.close()
+
+
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: xymonnet-loopback.py READYFILE")
+    if len(sys.argv) not in (2, 4):
+        raise SystemExit("usage: xymonnet-loopback.py READYFILE [CERT KEY]")
 
     ssh_listener = socket.socket()
     ssh_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     ssh_listener.bind(("127.0.0.1", 0))
     ssh_listener.listen()
 
+    tls_listener = None
+    tls_context = None
+    if len(sys.argv) == 4:
+        tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls_context.load_cert_chain(sys.argv[2], sys.argv[3])
+        tls_listener = socket.socket()
+        tls_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        tls_listener.bind(("127.0.0.1", 0))
+        tls_listener.listen()
+
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     with open(sys.argv[1], "w", encoding="ascii") as ready:
-        ready.write(f"{httpd.server_port} {ssh_listener.getsockname()[1]}\n")
+        tls_port = tls_listener.getsockname()[1] if tls_listener else ""
+        ready.write(f"{httpd.server_port} {ssh_listener.getsockname()[1]} {tls_port}\n")
 
     threading.Thread(target=serve_ssh, args=(ssh_listener,), daemon=True).start()
+    if tls_listener and tls_context:
+        threading.Thread(
+            target=serve_ftps, args=(tls_listener, tls_context), daemon=True
+        ).start()
     httpd.serve_forever()
 
 

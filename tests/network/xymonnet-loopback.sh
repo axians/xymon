@@ -23,7 +23,11 @@ mkdir -p "$work/runtime/etc" "$work/runtime/tmp" "$work/runtime/data" "$work/run
 cp "$protocols" "$work/runtime/etc/protocols.cfg"
 
 ready="$work/fixture.ports"
-python3 "$fixture" "$ready" >"$work/runtime/logs/fixture.log" 2>&1 &
+fixture_command=(python3 "$fixture" "$ready")
+if [[ -n ${XYMONNET_TLS_CERT:-} && -n ${XYMONNET_TLS_KEY:-} ]]; then
+	fixture_command+=("$XYMONNET_TLS_CERT" "$XYMONNET_TLS_KEY")
+fi
+"${fixture_command[@]}" >"$work/runtime/logs/fixture.log" 2>&1 &
 fixture_pid=$!
 register_cleanup "kill $fixture_pid 2>/dev/null || true"
 
@@ -35,12 +39,13 @@ for ((attempt = 0; attempt < 10000; attempt++)); do
 	}
 done
 [[ -s $ready ]] || fail "loopback fixture did not become ready"
-read -r http_port ssh_port < "$ready"
+read -r http_port ssh_port tls_port < "$ready"
 
 {
 	printf '%s' '127.0.0.1 valgrind.test # noconn'
 	printf ' http=plain;http://127.0.0.1:%s/good' "$http_port"
 	printf ' httphead=headok;http://127.0.0.1:%s/good' "$http_port"
+	printf ' httphead=headbad;http://127.0.0.1:%s/missing' "$http_port"
 	printf ' httpstatus=statusok;http://127.0.0.1:%s/good;2..;4..' "$http_port"
 	printf ' httpstatus=statusbad;http://127.0.0.1:%s/missing;2..;4..' "$http_port"
 	printf ' cont=contentok;http://127.0.0.1:%s/good;status=ok' "$http_port"
@@ -54,12 +59,17 @@ read -r http_port ssh_port < "$ready"
 	printf ' nopost=nopostok;http://127.0.0.1:%s/form;alpha=one;failure' "$http_port"
 	printf ' nopost=nopostbad;http://127.0.0.1:%s/form;alpha=one;received:alpha=one' "$http_port"
 	printf ' soap=soapok;http://127.0.0.1:%s/soap;<request/>;soap-ok' "$http_port"
+	printf ' soap=soapbad;http://127.0.0.1:%s/soap;<request/>;missing' "$http_port"
 	printf ' apache=http://127.0.0.1:%s/server-status?auto' "$http_port"
 	if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		printf ' ldap://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 		printf ' ldaps://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 	fi
-	printf ' ssh:%s !ssh:1\n' "$ssh_port"
+	printf ' ssh:%s !ssh:1 qmtp:%s ftp:%s smtp:1' "$ssh_port" "$ssh_port" "$ssh_port"
+	if [[ -n $tls_port ]]; then
+		printf ' ftps:%s' "$tls_port"
+	fi
+	printf '\n'
 } > "$work/runtime/etc/hosts.cfg"
 
 export XYMONHOME="$work/runtime"
@@ -88,6 +98,7 @@ fi
 for expected in \
 	'valgrind,test.plain green' \
 	'valgrind,test.headok green' \
+	'valgrind,test.headbad red' \
 	'valgrind,test.statusok green' \
 	'valgrind,test.statusbad red' \
 	'valgrind,test.contentok green' \
@@ -101,14 +112,31 @@ for expected in \
 	'valgrind,test.nopostok green' \
 	'valgrind,test.nopostbad red' \
 	'valgrind,test.soapok green' \
+	'valgrind,test.soapbad red' \
 	'data valgrind,test.apache' \
-	'valgrind,test.ssh green'
+	'valgrind,test.ssh green' \
+	'valgrind,test.qmtp green' \
+	'valgrind,test.ftp green' \
+	'valgrind,test.smtp red'
 do
 	grep -Fq "$expected" "$work/xymonnet.out" || {
 		cat "$work/xymonnet.out" >&2
 		fail "missing expected result: $expected"
 	}
 done
+
+if [[ -n $tls_port ]]; then
+	for tls_expected in \
+		'valgrind,test.ftps green' \
+		'valgrind,test.sslcert green'
+	do
+		grep -Fq "$tls_expected" "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			cat "$work/xymonnet.err" >&2
+			fail "missing expected TLS result: $tls_expected"
+		}
+	done
+fi
 
 if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 	for ldap_expected in \

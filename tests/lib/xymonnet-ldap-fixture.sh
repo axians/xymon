@@ -8,7 +8,7 @@ ldap_root=/work/runtime/ldap
 ldap_port=389
 mkdir -p "$ldap_root/data"
 
-openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
 	-subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' \
 	-keyout "$ldap_root/server.key" -out "$ldap_root/server.crt" \
 	>/dev/null 2>&1
@@ -78,3 +78,5 @@ LDAPTLS_REQCERT=never ldapsearch -x -ZZ \
 
 export LDAPTLS_REQCERT=never
 export XYMONNET_LDAP_PORT=$ldap_port
+export XYMONNET_TLS_CERT=$ldap_root/server.crt
+export XYMONNET_TLS_KEY=$ldap_root/server.key
