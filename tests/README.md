@@ -23,6 +23,19 @@ test also runs standalone — what reviewers do:
 
     ./tests/client/fs-filter-linux.sh
 
+The full `xymonnet` loopback scenario runs after `xymonnet` has been built:
+
+  ./tests/network/xymonnet-loopback.sh
+
+For a reproducible Ubuntu build and Memcheck run, use the opt-in Podman
+launcher. It copies the read-only source mount into the container before
+configuring and building, so it does not modify the checkout:
+
+  ./build/xymonnet-valgrind-podman.sh
+
+Set `XYMONNET_VALGRIND=0` to run the same containerized scenario without
+Memcheck when debugging fixture or functional failures.
+
 `bash` is a hard prerequisite of the suite (every test uses it; see
 Conventions). The runner itself is POSIX sh, and on a host without bash it
 skips the whole suite with exit `77` rather than reporting interpreter
