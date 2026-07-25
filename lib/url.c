@@ -226,7 +226,9 @@ static void load_netrc(void)
 					snprintf(item->auth, login_len + 1, "%s:%s", login, password);
 					item->next = loginhead;
 					loginhead = item;
-					host = login = password = NULL;
+					host = NULL;
+					xfree(login);
+					xfree(password);
 				}
 
 				p = strtok(NULL, " \t");
