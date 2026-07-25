@@ -39,12 +39,15 @@ for ((attempt = 0; attempt < 10000; attempt++)); do
 	}
 done
 [[ -s $ready ]] || fail "loopback fixture did not become ready"
-read -r http_port ssh_port tls_port dns_ready < "$ready"
+read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port https_port dns_ready ntp_ready < "$ready"
 
 {
-	printf '%s' '127.0.0.1 valgrind.test # noconn'
+	printf '%s' '127.0.0.1 valgrind.test #'
 	printf ' http=plain;http://127.0.0.1:%s/good' "$http_port"
 	printf ' http=plainbad;http://127.0.0.1:%s/missing' "$http_port"
+	printf ' http=redirect;http://127.0.0.1:%s/redirect' "$http_port"
+	printf ' http=authok;http://fixture:password@127.0.0.1:%s/auth' "$http_port"
+	printf ' http=authbad;http://fixture:wrong@127.0.0.1:%s/auth' "$http_port"
 	printf ' httphead=headok;http://127.0.0.1:%s/good' "$http_port"
 	printf ' httphead=headbad;http://127.0.0.1:%s/missing' "$http_port"
 	printf ' httpstatus=statusok;http://127.0.0.1:%s/good;2..;4..' "$http_port"
@@ -70,19 +73,36 @@ read -r http_port ssh_port tls_port dns_ready < "$ready"
 		printf ' dns=A:fixture.xymon.test dig=A:fixture.xymon.test'
 		printf ' dns=A:missing.xymon.test dig=A:missing.xymon.test'
 	fi
+	if [[ $ntp_ready = 1 ]]; then
+		printf ' ntp'
+	fi
 	printf ' ssh:%s !ssh:1 ssh:1 !ssh:%s' "$ssh_port" "$ssh_port"
-	printf ' qmtp:%s qmtp:1 ftp:%s ftp:1 smtp:1' "$ssh_port" "$ssh_port"
-	if [[ -n $tls_port ]]; then
+	printf ' qmtp:%s qmtp:1 ftp:%s ftp:1 smtp:1' "$ssh_port" "$ftp_port"
+	printf ' telnet:%s' "$telnet_port"
+	if [[ $tls_port != 0 ]]; then
 		printf ' ftps:%s ftps:%s' "$tls_port" "$ssh_port"
 	fi
+	if [[ $https_port != 0 ]]; then
+		printf ' http=httpsok;https://127.0.0.1:%s/good' "$https_port"
+	fi
 	printf '\n'
+	printf '127.0.0.1 bannerbad.test # noconn ssh:%s\n' "$bad_banner_port"
+	printf '192.0.2.1 pingfail.test # ?conn\n'
+	printf '127.0.0.1 pingreverse.test # !conn\n'
+	if [[ $ntp_ready = 1 ]]; then
+		printf '192.0.2.1 ntpfail.test # noconn ntp\n'
+	fi
 	if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		printf '127.0.0.1 ldapfail.test # noconn'
 		printf ' ldap://127.0.0.1:%s/dc=missing,dc=test?dc?base?(objectClass=*)\n' "$XYMONNET_LDAP_PORT"
 		printf '127.0.0.1 ldaptlsfail.test # noconn'
 		printf ' ldaps://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)\n' "$ssh_port"
+		printf '127.0.0.1 ldapauth.test # noconn ldaplogin=cn=admin,dc=xymon,dc=test:fixture-password'
+		printf ' ldap://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)\n' "$XYMONNET_LDAP_PORT"
+		printf '127.0.0.1 ldapauthfail.test # noconn ldaplogin=cn=admin,dc=xymon,dc=test:wrong-password'
+		printf ' ldap://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)\n' "$XYMONNET_LDAP_PORT"
 	fi
-	if [[ -n $tls_port ]]; then
+	if [[ $tls_port != 0 ]]; then
 		printf '127.0.0.1 certfail.test # noconn ssldays=400:400 ftps:%s\n' "$tls_port"
 	fi
 } > "$work/runtime/etc/hosts.cfg"
@@ -96,13 +116,14 @@ export XYMONSERVERLOGS="$work/runtime/logs"
 command=("$XYMONNET")
 if [[ ${XYMONNET_VALGRIND:-0} = 1 ]]; then
 	command -v valgrind >/dev/null 2>&1 || skip "valgrind not found"
-	command=(valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all
+	command=(valgrind --tool=memcheck --leak-check=full
+		--show-leak-kinds=definite,indirect,possible
 		--track-origins=yes --errors-for-leak-kinds=definite,indirect,possible
 		--error-exitcode=99 --log-file="$work/valgrind.log" "$XYMONNET")
 fi
 
 rc=0
-"${command[@]}" --no-update >"$work/xymonnet.out" 2>"$work/xymonnet.err" || rc=$?
+"${command[@]}" --no-update --checkresponse >"$work/xymonnet.out" 2>"$work/xymonnet.err" || rc=$?
 if ((rc != 0)); then
 	cat "$work/xymonnet.out" >&2
 	cat "$work/xymonnet.err" >&2
@@ -113,6 +134,9 @@ fi
 for expected in \
 	'valgrind,test.plain green' \
 	'valgrind,test.plainbad red' \
+	'valgrind,test.redirect green' \
+	'valgrind,test.authok green' \
+	'valgrind,test.authbad red' \
 	'valgrind,test.headok green' \
 	'valgrind,test.headbad red' \
 	'valgrind,test.statusok green' \
@@ -135,7 +159,12 @@ for expected in \
 	'valgrind,test.qmtp red' \
 	'valgrind,test.ftp green' \
 	'valgrind,test.ftp red' \
-	'valgrind,test.smtp red'
+	'valgrind,test.smtp red' \
+	'valgrind,test.telnet green' \
+	'bannerbad,test.ssh yellow' \
+	'valgrind,test.conn green' \
+	'pingfail,test.conn clear' \
+	'pingreverse,test.conn red'
 do
 	grep -Fq "$expected" "$work/xymonnet.out" || {
 		cat "$work/xymonnet.out" >&2
@@ -143,7 +172,12 @@ do
 	}
 done
 
-if [[ -n $tls_port ]]; then
+grep -Fq 'xymonnet telnet login:' "$work/xymonnet.out" || {
+	cat "$work/xymonnet.out" >&2
+	fail "telnet negotiation did not expose the fixture banner"
+}
+
+if [[ $tls_port != 0 ]]; then
 	for tls_expected in \
 		'valgrind,test.ftps green' \
 		'valgrind,test.ftps red' \
@@ -154,6 +188,28 @@ if [[ -n $tls_port ]]; then
 			cat "$work/xymonnet.out" >&2
 			cat "$work/xymonnet.err" >&2
 			fail "missing expected TLS result: $tls_expected"
+		}
+	done
+fi
+
+if [[ $https_port != 0 ]]; then
+	grep -Fq 'valgrind,test.httpsok green' "$work/xymonnet.out" || {
+		cat "$work/xymonnet.out" >&2
+		cat "$work/xymonnet.err" >&2
+		fail "missing successful HTTPS result"
+	}
+fi
+
+if [[ $ntp_ready = 1 ]]; then
+	for ntp_expected in \
+		'valgrind,test.ntp green' \
+		'ntpfail,test.ntp red' \
+		'NTP server 127.0.0.1 is synchronised'
+	do
+		grep -Fq "$ntp_expected" "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			cat "$work/xymonnet.err" >&2
+			fail "missing expected NTP result: $ntp_expected"
 		}
 	done
 fi
@@ -178,6 +234,8 @@ if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		'valgrind,test.ldap green' \
 		'ldapfail,test.ldap red' \
 		'ldaptlsfail,test.ldap red' \
+		'ldapauth,test.ldap green' \
+		'ldapauthfail,test.ldap red' \
 		"ldap://127.0.0.1:$XYMONNET_LDAP_PORT/" \
 		"ldaps://127.0.0.1:$XYMONNET_LDAP_PORT/"
 	do

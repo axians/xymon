@@ -35,6 +35,7 @@ make -j"$(nproc)" xymonnet-build
 
 . /work/tests/lib/xymonnet-ldap-fixture.sh
 
-XYMONNET=/work/xymonnet/xymonnet XYMONNET_DNS_FIXTURE=1 \
+XYMONNET=/work/xymonnet/xymonnet FPING=/work/xymonnet/xymonping \
+	XYMONNET_DNS_FIXTURE=1 XYMONNET_NTP_FIXTURE=1 \
 	XYMONNET_VALGRIND="${XYMONNET_VALGRIND:-1}" \
 	/work/tests/network/xymonnet-loopback.sh

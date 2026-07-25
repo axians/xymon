@@ -14,7 +14,8 @@ command -v podman >/dev/null 2>&1 || {
 	exit 77
 }
 
-exec podman run --rm --network private --security-opt label=disable \
+exec podman run --rm --network private --cap-add=NET_RAW \
+	--security-opt label=disable \
 	-e "XYMONNET_VALGRIND=${XYMONNET_VALGRIND:-1}" \
 	-v "$apt_cache_volume:/var/cache/apt" \
 	-v "$apt_lists_volume:/var/lib/apt/lists" \
