@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+import os
 import socket
 import ssl
+import struct
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -66,6 +68,40 @@ def serve_ftps(listener, context):
             connection.close()
 
 
+def serve_dns(dns_socket):
+    while True:
+        request, client = dns_socket.recvfrom(4096)
+        try:
+            offset = 12
+            while request[offset] != 0:
+                offset += request[offset] + 1
+            question_end = offset + 5
+            query_type = struct.unpack("!H", request[question_end - 4:question_end - 2])[0]
+            query_flags = struct.unpack("!H", request[2:4])[0]
+            response_flags = 0x8400 | (query_flags & 0x0100)
+            answer_count = 1 if query_type == 1 else 0
+            if answer_count == 0:
+                response_flags |= 3
+            response = struct.pack(
+                "!HHHHHH",
+                struct.unpack("!H", request[:2])[0],
+                response_flags,
+                1,
+                answer_count,
+                0,
+                0,
+            ) + request[12:question_end]
+            if answer_count:
+                response += (
+                    b"\xc0\x0c"
+                    + struct.pack("!HHIH", 1, 1, 60, 4)
+                    + socket.inet_aton("127.0.0.1")
+                )
+            dns_socket.sendto(response, client)
+        except (IndexError, struct.error):
+            continue
+
+
 def main():
     if len(sys.argv) not in (2, 4):
         raise SystemExit("usage: xymonnet-loopback.py READYFILE [CERT KEY]")
@@ -85,16 +121,27 @@ def main():
         tls_listener.bind(("127.0.0.1", 0))
         tls_listener.listen()
 
+    dns_socket = None
+    if os.environ.get("XYMONNET_DNS_FIXTURE") == "1":
+        dns_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        dns_socket.bind(("127.0.0.1", 53))
+
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     with open(sys.argv[1], "w", encoding="ascii") as ready:
         tls_port = tls_listener.getsockname()[1] if tls_listener else ""
-        ready.write(f"{httpd.server_port} {ssh_listener.getsockname()[1]} {tls_port}\n")
+        dns_ready = "1" if dns_socket else ""
+        ready.write(
+            f"{httpd.server_port} {ssh_listener.getsockname()[1]} "
+            f"{tls_port} {dns_ready}\n"
+        )
 
     threading.Thread(target=serve_ssh, args=(ssh_listener,), daemon=True).start()
     if tls_listener and tls_context:
         threading.Thread(
             target=serve_ftps, args=(tls_listener, tls_context), daemon=True
         ).start()
+    if dns_socket:
+        threading.Thread(target=serve_dns, args=(dns_socket,), daemon=True).start()
     httpd.serve_forever()
 
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# Exercise the full xymonnet binary against deterministic loopback HTTP and
-# TCP fixtures. Set XYMONNET_VALGRIND=1 to run the same scenario under Memcheck.
+# Exercise the full xymonnet binary against deterministic loopback network
+# fixtures. Set XYMONNET_VALGRIND=1 to run the same scenario under Memcheck.
 
 set -euo pipefail
 
@@ -39,7 +39,7 @@ for ((attempt = 0; attempt < 10000; attempt++)); do
 	}
 done
 [[ -s $ready ]] || fail "loopback fixture did not become ready"
-read -r http_port ssh_port tls_port < "$ready"
+read -r http_port ssh_port tls_port dns_ready < "$ready"
 
 {
 	printf '%s' '127.0.0.1 valgrind.test # noconn'
@@ -64,6 +64,9 @@ read -r http_port ssh_port tls_port < "$ready"
 	if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		printf ' ldap://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 		printf ' ldaps://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
+	fi
+	if [[ $dns_ready = 1 ]]; then
+		printf ' dns=A:fixture.xymon.test dig=A:fixture.xymon.test'
 	fi
 	printf ' ssh:%s !ssh:1 qmtp:%s ftp:%s smtp:1' "$ssh_port" "$ssh_port" "$ssh_port"
 	if [[ -n $tls_port ]]; then
@@ -138,6 +141,15 @@ if [[ -n $tls_port ]]; then
 	done
 fi
 
+if [[ $dns_ready = 1 ]]; then
+	[[ $(grep -Fc 'valgrind,test.dns green' "$work/xymonnet.out") = 2 ]] || {
+		cat "$work/xymonnet.out" >&2
+		cat "$work/xymonnet.err" >&2
+		fail "expected successful dns and dig reports"
+	}
+	grep -Fq 'fixture.xymon.test' "$work/xymonnet.out" || fail "DNS answer is missing"
+fi
+
 if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 	for ldap_expected in \
 		'valgrind,test.ldap green' \
@@ -162,4 +174,4 @@ if [[ ${XYMONNET_VALGRIND:-0} = 1 ]]; then
 	grep -Eq 'ERROR SUMMARY: 0 errors from 0 contexts' "$work/valgrind.log" || fail "Valgrind reported memory errors"
 fi
 
-pass "xymonnet loopback HTTP/TCP scenarios"
+pass "xymonnet loopback network scenarios"
