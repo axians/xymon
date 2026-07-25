@@ -93,12 +93,13 @@ strbuffer_t *dupstrbuffer(char *src)
 	strbuffer_t *newbuf;
 	int len = 0;
 	
-	newbuf = newstrbuffer(0);
 	if (src) {
-		newbuf->s = strdup(src);
 		len = strlen(src);
-		newbuf->used = newbuf->sz = len;
+		newbuf = newstrbuffer(len + 1);
+		memcpy(newbuf->s, src, len + 1);
+		newbuf->used = len;
 	}
+	else newbuf = newstrbuffer(0);
 
 	return newbuf;
 }

@@ -1388,6 +1388,7 @@ int finish_ping_service(service_t *service)
 						if (strcmp(t->host->ip, pingip) == 0) {
 							if (t->open) dbgprintf("More than one ping result for %s\n", pingip);
 							t->open = (strstr(l, "is alive") != NULL);
+							freestrbuffer(t->banner);
 							t->banner = dupstrbuffer(l);
 						}
 
@@ -1397,6 +1398,7 @@ int finish_ping_service(service_t *service)
 								if (strcmp(walk->ip, pingip) == 0) {
 									if (t->open) dbgprintf("More than one ping result for %s\n", pingip);
 									walk->open = (strstr(l, "is alive") != NULL);
+									freestrbuffer(walk->banner);
 									walk->banner = dupstrbuffer(l);
 								}
 							}
@@ -2471,6 +2473,7 @@ int main(int argc, char *argv[])
 					tcptest_t *testresult = (tcptest_t *)t->privdata;
 
 					t->open = testresult->open;
+					freestrbuffer(t->banner);
 					t->banner = dupstrbuffer(testresult->banner);
 					t->certinfo = testresult->certinfo;
 					t->certissuer = testresult->certissuer;
