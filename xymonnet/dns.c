@@ -295,6 +295,7 @@ int dns_test_server(char *serverip, char *hostname, strbuffer_t *banner)
 	char *tst;
 	dns_resp_t *responses = NULL;
 	dns_resp_t *walk = NULL;
+	dns_resp_t *next = NULL;
 	int i;
 
 	dns_init();
@@ -347,7 +348,8 @@ int dns_test_server(char *serverip, char *hostname, strbuffer_t *banner)
 	clearstrbuffer(banner); status = ARES_SUCCESS;
 	strncpy(tspec, hostname, tspec_buflen);
 	tst = strtok(tspec, ",");
-	for (walk = responses, i=1; (walk); walk = walk->next, i++) {
+	for (walk = responses, i=1; (walk); walk = next, i++) {
+		next = walk->next;
 		/* Print an identifying line if more than one query */
 		if ((walk != responses) || (walk->next)) {
 			snprintf(msg, sizeof(msg), "\n*** DNS lookup of '%s' ***\n", tst);
@@ -355,7 +357,8 @@ int dns_test_server(char *serverip, char *hostname, strbuffer_t *banner)
 		}
 		addtostrbuffer(banner, walk->msgbuf);
 		if (walk->msgstatus != ARES_SUCCESS) status = walk->msgstatus;
-		xfree(walk->msgbuf);
+		freestrbuffer(walk->msgbuf);
+		xfree(walk);
 		tst = strtok(NULL, ",");
 	}
 	xfree(tspec);
