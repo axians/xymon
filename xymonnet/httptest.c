@@ -341,6 +341,7 @@ void add_http_test(testitem_t *t)
 	cookielist_t *ck = NULL;
 	int firstcookie = 1;
 	char *decodedurl;
+	char *auth64;
 	strbuffer_t *httprequest;
 	void *hinfo = NULL;
 
@@ -617,13 +618,17 @@ void add_http_test(testitem_t *t)
 		}
 		else {
 			addtobuffer(httprequest, "Authorization: Basic ");
-			addtobuffer(httprequest, base64encode(httptest->weburl.desturl->auth));
+			auth64 = base64encode(httptest->weburl.desturl->auth);
+			addtobuffer(httprequest, auth64);
+			xfree(auth64);
 			addtobuffer(httprequest, "\r\n");
 		}
 	}
 	if (httptest->weburl.proxyurl && httptest->weburl.proxyurl->auth) {
 		addtobuffer(httprequest, "Proxy-Authorization: Basic ");
-		addtobuffer(httprequest, base64encode(httptest->weburl.proxyurl->auth));
+		auth64 = base64encode(httptest->weburl.proxyurl->auth);
+		addtobuffer(httprequest, auth64);
+		xfree(auth64);
 		addtobuffer(httprequest, "\r\n");
 	}
 	for (ck = cookiehead; (ck); ck = ck->next) {

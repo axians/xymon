@@ -283,13 +283,17 @@ static int do_telnet_options(tcptest_t *item)
 
 	while (remain > 0) {
 		if ((remain < 3) || (*inp != 255)) {                     /* IAC? */
+			unsigned char *banner;
+
 			/*
 			 * End of options. 
 			 * We probably have the banner in the remainder of the
 			 * buffer, so copy it over, and return it.
 			 */
-			item->banner = strdup(inp);
-			item->bannerbytes = strlen(inp);
+			banner = (unsigned char *)strdup((char *)inp);
+			xfree(item->telnetbuf);
+			item->banner = banner;
+			item->bannerbytes = strlen((char *)banner);
 			item->telnetbuflen = 0;
 			xfree(obuf);
 			return 0;
@@ -1302,6 +1306,10 @@ restartselect:
 								 */
 								res = socket_write(item, outbuf, outlen);
 								tcp_stats_written += res;
+								if (outbuf == item->telnetbuf) {
+									xfree(item->telnetbuf);
+									item->telnetbuflen = 0;
+								}
 								if (res == -1) {
 									/* Write failed - this socket is done. */
 									dbgprintf("write failed\n");

@@ -1277,6 +1277,9 @@ int start_ping_service(service_t *service)
 		}
 	}
 
+	for (i = 0; cmdargs[i]; i++) xfree(cmdargs[i]);
+	xfree(cmdargs);
+
 	for (handle = xtreeFirst(iptree); handle != xtreeEnd(iptree); handle = xtreeNext(iptree, handle)) {
 		char *rec = xtreeKey(iptree, handle);
 		xfree(rec);
