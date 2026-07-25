@@ -38,6 +38,13 @@ LDAPv3 STARTTLS search:
 Set `XYMONNET_VALGRIND=0` to run the same containerized scenario without
 Memcheck when debugging fixture or functional failures.
 
+The launcher keeps APT packages and index lists in the named Podman volumes
+`xymonnet-valgrind-apt-cache` and `xymonnet-valgrind-apt-lists`. Override the
+names with `XYMON_VALGRIND_APT_CACHE_VOLUME` and
+`XYMON_VALGRIND_APT_LISTS_VOLUME`, or clear the defaults with:
+
+  podman volume rm xymonnet-valgrind-apt-cache xymonnet-valgrind-apt-lists
+
 `bash` is a hard prerequisite of the suite (every test uses it; see
 Conventions). The runner itself is POSIX sh, and on a host without bash it
 skips the whole suite with exit `77` rather than reporting interpreter

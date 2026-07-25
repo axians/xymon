@@ -6,6 +6,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+rm -f /etc/apt/apt.conf.d/docker-clean
 apt-get update
 apt-get install -y --no-install-recommends \
 	build-essential ca-certificates libc-ares-dev libldap2-dev libpcre2-dev \
