@@ -73,13 +73,18 @@ def serve_dns(dns_socket):
         request, client = dns_socket.recvfrom(4096)
         try:
             offset = 12
+            labels = []
             while request[offset] != 0:
-                offset += request[offset] + 1
+                label_length = request[offset]
+                offset += 1
+                labels.append(request[offset:offset + label_length].decode("ascii"))
+                offset += label_length
             question_end = offset + 5
             query_type = struct.unpack("!H", request[question_end - 4:question_end - 2])[0]
+            query_name = ".".join(labels)
             query_flags = struct.unpack("!H", request[2:4])[0]
             response_flags = 0x8400 | (query_flags & 0x0100)
-            answer_count = 1 if query_type == 1 else 0
+            answer_count = 1 if query_type == 1 and query_name == "fixture.xymon.test" else 0
             if answer_count == 0:
                 response_flags |= 3
             response = struct.pack(
@@ -98,7 +103,7 @@ def serve_dns(dns_socket):
                     + socket.inet_aton("127.0.0.1")
                 )
             dns_socket.sendto(response, client)
-        except (IndexError, struct.error):
+        except (IndexError, UnicodeDecodeError, struct.error):
             continue
 
 

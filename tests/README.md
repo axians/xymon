@@ -31,8 +31,8 @@ For a reproducible Ubuntu build and Memcheck run, use the opt-in Podman
 launcher. It copies the read-only source mount into the container before
 configuring and building, so it does not modify the checkout. The container
 also starts an OpenLDAP fixture and exercises both a plain LDAP search and an
-LDAPv3 STARTTLS search. The loopback matrix covers 28 HTTP, DNS, LDAP, plain
-TCP, and TLS probes, including expected failure and reverse-test paths:
+LDAPv3 STARTTLS search. The loopback matrix covers 39 HTTP, DNS, LDAP, plain
+TCP, and TLS probes, pairing green behaviors with deterministic failure paths:
 
   ./build/xymonnet-valgrind-podman.sh
 

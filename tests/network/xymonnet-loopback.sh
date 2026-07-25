@@ -44,6 +44,7 @@ read -r http_port ssh_port tls_port dns_ready < "$ready"
 {
 	printf '%s' '127.0.0.1 valgrind.test # noconn'
 	printf ' http=plain;http://127.0.0.1:%s/good' "$http_port"
+	printf ' http=plainbad;http://127.0.0.1:%s/missing' "$http_port"
 	printf ' httphead=headok;http://127.0.0.1:%s/good' "$http_port"
 	printf ' httphead=headbad;http://127.0.0.1:%s/missing' "$http_port"
 	printf ' httpstatus=statusok;http://127.0.0.1:%s/good;2..;4..' "$http_port"
@@ -67,12 +68,23 @@ read -r http_port ssh_port tls_port dns_ready < "$ready"
 	fi
 	if [[ $dns_ready = 1 ]]; then
 		printf ' dns=A:fixture.xymon.test dig=A:fixture.xymon.test'
+		printf ' dns=A:missing.xymon.test dig=A:missing.xymon.test'
 	fi
-	printf ' ssh:%s !ssh:1 qmtp:%s ftp:%s smtp:1' "$ssh_port" "$ssh_port" "$ssh_port"
+	printf ' ssh:%s !ssh:1 ssh:1 !ssh:%s' "$ssh_port" "$ssh_port"
+	printf ' qmtp:%s qmtp:1 ftp:%s ftp:1 smtp:1' "$ssh_port" "$ssh_port"
 	if [[ -n $tls_port ]]; then
-		printf ' ftps:%s' "$tls_port"
+		printf ' ftps:%s ftps:%s' "$tls_port" "$ssh_port"
 	fi
 	printf '\n'
+	if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
+		printf '127.0.0.1 ldapfail.test # noconn'
+		printf ' ldap://127.0.0.1:%s/dc=missing,dc=test?dc?base?(objectClass=*)\n' "$XYMONNET_LDAP_PORT"
+		printf '127.0.0.1 ldaptlsfail.test # noconn'
+		printf ' ldaps://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)\n' "$ssh_port"
+	fi
+	if [[ -n $tls_port ]]; then
+		printf '127.0.0.1 certfail.test # noconn ssldays=400:400 ftps:%s\n' "$tls_port"
+	fi
 } > "$work/runtime/etc/hosts.cfg"
 
 export XYMONHOME="$work/runtime"
@@ -100,6 +112,7 @@ fi
 
 for expected in \
 	'valgrind,test.plain green' \
+	'valgrind,test.plainbad red' \
 	'valgrind,test.headok green' \
 	'valgrind,test.headbad red' \
 	'valgrind,test.statusok green' \
@@ -119,7 +132,9 @@ for expected in \
 	'data valgrind,test.apache' \
 	'valgrind,test.ssh green' \
 	'valgrind,test.qmtp green' \
+	'valgrind,test.qmtp red' \
 	'valgrind,test.ftp green' \
+	'valgrind,test.ftp red' \
 	'valgrind,test.smtp red'
 do
 	grep -Fq "$expected" "$work/xymonnet.out" || {
@@ -131,7 +146,9 @@ done
 if [[ -n $tls_port ]]; then
 	for tls_expected in \
 		'valgrind,test.ftps green' \
-		'valgrind,test.sslcert green'
+		'valgrind,test.ftps red' \
+		'valgrind,test.sslcert green' \
+		'certfail,test.sslcert red'
 	do
 		grep -Fq "$tls_expected" "$work/xymonnet.out" || {
 			cat "$work/xymonnet.out" >&2
@@ -147,12 +164,20 @@ if [[ $dns_ready = 1 ]]; then
 		cat "$work/xymonnet.err" >&2
 		fail "expected successful dns and dig reports"
 	}
+	[[ $(grep -Fc 'valgrind,test.dns red' "$work/xymonnet.out") = 2 ]] || {
+		cat "$work/xymonnet.out" >&2
+		cat "$work/xymonnet.err" >&2
+		fail "expected failed dns and dig reports"
+	}
 	grep -Fq 'fixture.xymon.test' "$work/xymonnet.out" || fail "DNS answer is missing"
+	grep -Fq 'Name not found' "$work/xymonnet.out" || fail "DNS failure is missing"
 fi
 
 if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 	for ldap_expected in \
 		'valgrind,test.ldap green' \
+		'ldapfail,test.ldap red' \
+		'ldaptlsfail,test.ldap red' \
 		"ldap://127.0.0.1:$XYMONNET_LDAP_PORT/" \
 		"ldaps://127.0.0.1:$XYMONNET_LDAP_PORT/"
 	do
@@ -166,6 +191,8 @@ fi
 
 [[ $(grep -Fc 'valgrind,test.ssh green' "$work/xymonnet.out") = 2 ]] ||
 	fail "expected successful reports for the positive and reverse SSH checks"
+[[ $(grep -Fc 'valgrind,test.ssh red' "$work/xymonnet.out") = 2 ]] ||
+	fail "expected failed reports for the positive and reverse SSH checks"
 
 if [[ ${XYMONNET_VALGRIND:-0} = 1 ]]; then
 	grep -Eq 'definitely lost: 0 bytes in 0 blocks' "$work/valgrind.log" || fail "Valgrind found definitely lost memory"
