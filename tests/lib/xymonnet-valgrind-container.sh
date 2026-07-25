@@ -9,7 +9,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
 	build-essential ca-certificates libc-ares-dev libldap2-dev libpcre2-dev \
-	librrd-dev libssl-dev libtirpc-dev python3 valgrind
+	librrd-dev libssl-dev libtirpc-dev ldap-utils openssl python3 slapd valgrind
 
 cp -a /src /work
 cd /work
@@ -31,6 +31,8 @@ set +o pipefail
 yes "" | ./configure.server --caresinclude /nonexistent
 set -o pipefail
 make -j"$(nproc)" xymonnet-build
+
+. /work/tests/lib/xymonnet-ldap-fixture.sh
 
 XYMONNET=/work/xymonnet/xymonnet XYMONNET_VALGRIND="${XYMONNET_VALGRIND:-1}" \
 	/work/tests/network/xymonnet-loopback.sh

@@ -29,7 +29,9 @@ The full `xymonnet` loopback scenario runs after `xymonnet` has been built:
 
 For a reproducible Ubuntu build and Memcheck run, use the opt-in Podman
 launcher. It copies the read-only source mount into the container before
-configuring and building, so it does not modify the checkout:
+configuring and building, so it does not modify the checkout. The container
+also starts an OpenLDAP fixture and exercises both a plain LDAP search and an
+LDAPv3 STARTTLS search:
 
   ./build/xymonnet-valgrind-podman.sh
 

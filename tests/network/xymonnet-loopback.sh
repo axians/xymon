@@ -55,6 +55,10 @@ read -r http_port ssh_port < "$ready"
 	printf ' nopost=nopostbad;http://127.0.0.1:%s/form;alpha=one;received:alpha=one' "$http_port"
 	printf ' soap=soapok;http://127.0.0.1:%s/soap;<request/>;soap-ok' "$http_port"
 	printf ' apache=http://127.0.0.1:%s/server-status?auto' "$http_port"
+	if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
+		printf ' ldap://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
+		printf ' ldaps://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
+	fi
 	printf ' ssh:%s !ssh:1\n' "$ssh_port"
 } > "$work/runtime/etc/hosts.cfg"
 
@@ -105,6 +109,20 @@ do
 		fail "missing expected result: $expected"
 	}
 done
+
+if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
+	for ldap_expected in \
+		'valgrind,test.ldap green' \
+		"ldap://127.0.0.1:$XYMONNET_LDAP_PORT/" \
+		"ldaps://127.0.0.1:$XYMONNET_LDAP_PORT/"
+	do
+		grep -Fq "$ldap_expected" "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			cat "$work/xymonnet.err" >&2
+			fail "missing expected LDAP result: $ldap_expected"
+		}
+	done
+fi
 
 [[ $(grep -Fc 'valgrind,test.ssh green' "$work/xymonnet.out") = 2 ]] ||
 	fail "expected successful reports for the positive and reverse SSH checks"
