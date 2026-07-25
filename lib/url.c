@@ -286,7 +286,7 @@ void parse_url(char *inputurl, urlelem_t *url)
 	char *tempurl;
 	char *fragment = NULL;
 	char *netloc;
-	char *startp, *p;
+	char *startp, *p, *schemename;
 	int haveportspec = 0;
 	char *canonurl;
 	int canonurllen;
@@ -305,32 +305,33 @@ void parse_url(char *inputurl, urlelem_t *url)
 	if (p) {
 		*p = '\0';
 		if (strncasecmp(startp, "https", 5) == 0) {
-			url->scheme = "https";
+			schemename = "https";
 			url->port = 443;
 			if (strlen(startp) > 5) url->schemeopts = strdup(startp+5);
 		} else if (strncasecmp(startp, "http", 4) == 0) {
-			url->scheme = "http";
+			schemename = "http";
 			url->port = 80;
 			if (strlen(startp) > 4) url->schemeopts = strdup(startp+4);
 		} else if (strncasecmp(startp, "ftps", 4) == 0) {
-			url->scheme = "ftps";
+			schemename = "ftps";
 			url->port = 990;
 		} else if (strncasecmp(startp, "ftp", 3) == 0) {
-			url->scheme = "ftp";
+			schemename = "ftp";
 			url->port = 21;
 		} else if (strncasecmp(startp, "ldaps", 5) == 0) {
-			url->scheme = "ldaps";
+			schemename = "ldaps";
 			url->port = 389; /* ldaps:// URL's are non-standard, and must use port 389+STARTTLS */
 		} else if (strncasecmp(startp, "ldap", 4) == 0) {
-			url->scheme = "ldap";
+			schemename = "ldap";
 			url->port = 389;
 		}
 		else {
 			/* Unknown scheme! */
 			errprintf("Unknown URL scheme '%s' in URL '%s'\n", startp, inputurl);
-			url->scheme = strdup(startp);
+			schemename = startp;
 			url->port = 0;
 		}
+		url->scheme = strdup(schemename);
 		startp = (p+1);
 	}
 	else {
@@ -435,12 +436,7 @@ static void free_urlelem(urlelem_t *url)
 	if (url->ip) xfree(url->ip);
 	if (url->auth) xfree(url->auth);
 	if (url->relurl) xfree(url->relurl);
-	if (url->scheme && *url->scheme &&
-	    (strcmp(url->scheme, "http") != 0) && (strcmp(url->scheme, "https") != 0) &&
-	    (strcmp(url->scheme, "ftp") != 0) && (strcmp(url->scheme, "ftps") != 0) &&
-	    (strcmp(url->scheme, "ldap") != 0) && (strcmp(url->scheme, "ldaps") != 0)) {
-		xfree(url->scheme);
-	}
+	if (url->scheme) xfree(url->scheme);
 
 	xfree(url);
 }
