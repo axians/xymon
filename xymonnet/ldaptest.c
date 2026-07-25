@@ -345,13 +345,11 @@ void run_ldap_tests(service_t *ldaptest, int sslcertcheck, int querytimeout)
 						snprintf(buf, sizeof(buf), "\t%s: %s\n", attribute, vals[i]);
 						addtobuffer(response, buf);
 					}
+					ldap_value_free(vals);
 				}
-				/* Free memory used to store values */
-				ldap_value_free(vals);
+				ldap_memfree(attribute);
 			}
 
-			/* Free memory used to store attribute */
-			ldap_memfree(attribute);
 			ldap_memfree(dn);
 			if (ber != NULL) ber_free(ber, 0);
 
