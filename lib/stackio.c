@@ -236,6 +236,11 @@ FILE *stackfopen(char *filename, char *mode, void **v_listhead)
 			*listhead = newlistitem;
 		}
 	}
+	else if (fdhead == NULL) {
+		xfree(stackfd_base);
+		xfree(stackfd_mode);
+		stackfd_base = stackfd_mode = NULL;
+	}
 
 	MEMUNDEFINE(stackfd_filename);
 

@@ -589,6 +589,7 @@ void load_tests(void)
 						if (!url.desturl->ip)
 							add_url_to_dns_queue(testspec);
 					}
+					free_weburl(&url);
 				}
 				else if (argnmatch(testspec, "apache") || argnmatch(testspec, "apache=")) {
 					char *userfmt = "cont=apache;%s;.";
@@ -613,6 +614,7 @@ void load_tests(void)
 							snprintf(statusurl, statusurl_buflen, userfmt, userurl);
 							s = httptest;
 						}
+						free_weburl(&url);
 					}
 					else {
 						char *ip = xmh_item(hwalk, XMH_IP);
@@ -1865,6 +1867,8 @@ void send_results(service_t *service, int failgoesclear)
 		addtostatus("\n\n");
 		finish_status();
 	}
+
+	xfree(svcname);
 }
 
 
@@ -2428,6 +2432,7 @@ int main(int argc, char *argv[])
 	add_timestamp("Test engine setup completed");
 
 	do_tcp_tests(timeout, concurrency);
+	free_http_requests(httptest);
 	add_timestamp("TCP tests completed");
 
 	if (pingrunning) {

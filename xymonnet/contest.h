@@ -164,6 +164,7 @@ typedef struct {
 	char		*url;			/* URL to request, stripped of configuration artefacts */
 	int		parsestatus;
 	weburl_t	weburl;
+	unsigned char	*request;		/* Original request allocation; tcptest->sendtxt advances while writing */
 
 	int		gotheaders;
 	int		contlen;

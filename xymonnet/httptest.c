@@ -341,7 +341,7 @@ void add_http_test(testitem_t *t)
 	cookielist_t *ck = NULL;
 	int firstcookie = 1;
 	char *decodedurl;
-	strbuffer_t *httprequest = newstrbuffer(0);
+	strbuffer_t *httprequest;
 	void *hinfo = NULL;
 
 	/* Allocate the private data and initialize it */
@@ -364,6 +364,7 @@ void add_http_test(testitem_t *t)
 	/* If there was a parse error in the URL, don't run the test */
 	if (httptest->parsestatus) return;
 
+	httprequest = newstrbuffer(0);
 
 	if (httptest->weburl.proxyurl && (httptest->weburl.proxyurl->ip == NULL)) {
 		dnsip = dnsresolve(httptest->weburl.proxyurl->host);
@@ -682,12 +683,13 @@ void add_http_test(testitem_t *t)
 	}
 
 	/* Add to TCP test queue */
+	httptest->request = grabstrbuffer(httprequest);
 	if (httptest->weburl.proxyurl == NULL) {
 		httptest->tcptest = add_tcp_test(httptest->weburl.desturl->ip, 
 						 httptest->weburl.desturl->port, 
 						 httptest->weburl.desturl->scheme,
 						 sslopt, t->srcip,
-						 t->testspec, t->silenttest, grabstrbuffer(httprequest), 
+						 t->testspec, t->silenttest, httptest->request,
 						 httptest, tcp_http_data_callback, tcp_http_final_callback);
 	}
 	else {
@@ -695,7 +697,7 @@ void add_http_test(testitem_t *t)
 						 httptest->weburl.proxyurl->port, 
 						 httptest->weburl.proxyurl->scheme,
 						 sslopt, t->srcip,
-						 t->testspec, t->silenttest, grabstrbuffer(httprequest), 
+						 t->testspec, t->silenttest, httptest->request,
 						 httptest, tcp_http_data_callback, tcp_http_final_callback);
 	}
 
@@ -705,5 +707,19 @@ void add_http_test(testitem_t *t)
 		httptest->tcptest->sni = NULL;
 	else
 		httptest->tcptest->sni = (snienabled ? httptest->weburl.desturl->host : NULL);
+}
+
+void free_http_requests(service_t *httptest)
+{
+	testitem_t *t;
+
+	for (t = httptest->items; (t); t = t->next) {
+		http_data_t *req = (http_data_t *)t->privdata;
+
+		if (req && req->request) {
+			xfree(req->request);
+			req->request = NULL;
+		}
+	}
 }
 

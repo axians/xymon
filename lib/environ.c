@@ -337,11 +337,14 @@ char *getenv_default(char *envname, char *envdefault, char **buf)
 
 	val = getenv(envname);	/* Don't use xgetenv() here! */
 	if (!val) {
+#ifdef HAVE_SETENV
+		setenv(envname, envdefault, 0);
+#else
 		unsigned int val_buflen = strlen(envname) + strlen(envdefault) + 2;
 		val = (char *)malloc(val_buflen);
 		snprintf(val, val_buflen, "%s=%s", envname, envdefault);
 		putenv(val);
-		/* Don't free the string - it must be kept for the environment to work */
+#endif
 		val = xgetenv(envname);	/* OK to use xgetenv here */
 	}
 

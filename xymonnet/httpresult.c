@@ -379,11 +379,12 @@ void send_http_results(service_t *httptest, testedhost_t *host, testitem_t *firs
 	for (t=firsttest; (t && (t->host == host)); t = t->next) {
 		http_data_t *req;
 		char *data = "";
-		strbuffer_t *msg = newstrbuffer(0);
+		strbuffer_t *msg;
 		char msgline[1024];
 
 		if (!t->senddata) continue;
 
+		msg = newstrbuffer(0);
 		req = (http_data_t *) t->privdata;
 		if (req->output) data = req->output;
 
@@ -392,6 +393,11 @@ void send_http_results(service_t *httptest, testedhost_t *host, testitem_t *firs
 		addtobuffer(msg, data);
 		combo_add(msg);
 
+		if (req->output) {
+			xfree(req->output);
+			req->output = NULL;
+			req->outlen = 0;
+		}
 		freestrbuffer(msg);
 	}
 
@@ -632,6 +638,12 @@ void send_content_results(service_t *httptest, testedhost_t *host,
 
 		addtostatus("\n\n");
 		finish_status();
+
+		if (req->output) {
+			xfree(req->output);
+			req->output = NULL;
+			req->outlen = 0;
+		}
 	}
 
 	xfree(conttest);

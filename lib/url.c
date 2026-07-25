@@ -292,7 +292,6 @@ void parse_url(char *inputurl, urlelem_t *url)
 	int canonurllen;
 
 	memset(url, 0, sizeof(urlelem_t));
-	url->scheme = url->host = url->relurl = "";
 
 	/* Get a temp. buffer we can molest */
 	tempurl = strdup(inputurl);
@@ -424,6 +423,41 @@ void parse_url(char *inputurl, urlelem_t *url)
 
 	xfree(tempurl);
 	return;
+}
+
+static void free_urlelem(urlelem_t *url)
+{
+	if (url == NULL) return;
+
+	if (url->origform) xfree(url->origform);
+	if (url->schemeopts) xfree(url->schemeopts);
+	if (url->host) xfree(url->host);
+	if (url->ip) xfree(url->ip);
+	if (url->auth) xfree(url->auth);
+	if (url->relurl) xfree(url->relurl);
+	if (url->scheme && *url->scheme &&
+	    (strcmp(url->scheme, "http") != 0) && (strcmp(url->scheme, "https") != 0) &&
+	    (strcmp(url->scheme, "ftp") != 0) && (strcmp(url->scheme, "ftps") != 0) &&
+	    (strcmp(url->scheme, "ldap") != 0) && (strcmp(url->scheme, "ldaps") != 0)) {
+		xfree(url->scheme);
+	}
+
+	xfree(url);
+}
+
+void free_weburl(weburl_t *weburl)
+{
+	if (weburl == NULL) return;
+
+	if (weburl->columnname) xfree(weburl->columnname);
+	free_urlelem(weburl->desturl);
+	free_urlelem(weburl->proxyurl);
+	if (weburl->postcontenttype) xfree(weburl->postcontenttype);
+	if (weburl->postdata) xfree(weburl->postdata);
+	if (weburl->expdata) xfree(weburl->expdata);
+	if (weburl->okcodes) xfree(weburl->okcodes);
+	if (weburl->badcodes) xfree(weburl->badcodes);
+	memset(weburl, 0, sizeof(*weburl));
 }
 
 /*
