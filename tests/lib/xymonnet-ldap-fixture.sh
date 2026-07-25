@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
-# Sourced by xymonnet-valgrind-container.sh after slapd is installed.
+# Sourced by xymonnet-system-container.sh after slapd is installed.
 
 set -euo pipefail
 

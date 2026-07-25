@@ -7,7 +7,7 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-. "$here/../lib/assert.sh"
+. "$here/../../lib/assert.sh"
 
 require_bin XYMONNET xymonnet/xymonnet
 command -v python3 >/dev/null 2>&1 || skip "python3 not found"
@@ -52,7 +52,7 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 	https_port mtls_port dns_ready ntp_ready < "$ready"
 
 {
-	printf '%s' '127.0.0.1 valgrind.test #'
+	printf '%s' '127.0.0.1 system.test #'
 	printf ' http=plain;http://127.0.0.1:%s/good' "$http_port"
 	printf ' http=plainbad;http://127.0.0.1:%s/missing' "$http_port"
 	printf ' http=redirect;http://127.0.0.1:%s/redirect' "$http_port"
@@ -150,41 +150,41 @@ if ((rc != 0)); then
 fi
 
 for expected in \
-	'valgrind,test.plain green' \
-	'valgrind,test.plainbad red' \
-	'valgrind,test.redirect green' \
-	'valgrind,test.authok green' \
-	'valgrind,test.authbad red' \
-	'valgrind,test.netrcok green' \
-	'valgrind,test.netrcbad red' \
-	'valgrind,test.headok green' \
-	'valgrind,test.headbad red' \
-	'valgrind,test.statusok green' \
-	'valgrind,test.statusbad red' \
-	'valgrind,test.contentok green' \
-	'valgrind,test.contentbad red' \
-	'valgrind,test.absentok green' \
-	'valgrind,test.absentbad red' \
-	'valgrind,test.typeok green' \
-	'valgrind,test.typebad red' \
-	'valgrind,test.postok green' \
-	'valgrind,test.postbad red' \
-	'valgrind,test.nopostok green' \
-	'valgrind,test.nopostbad red' \
-	'valgrind,test.soapok green' \
-	'valgrind,test.soapbad red' \
-	'valgrind,test.nosoapok green' \
-	'valgrind,test.nosoapbad red' \
-	'data valgrind,test.apache' \
-	'valgrind,test.ssh green' \
-	'valgrind,test.qmtp green' \
-	'valgrind,test.qmtp red' \
-	'valgrind,test.ftp green' \
-	'valgrind,test.ftp red' \
-	'valgrind,test.smtp red' \
-	'valgrind,test.telnet green' \
+	'system,test.plain green' \
+	'system,test.plainbad red' \
+	'system,test.redirect green' \
+	'system,test.authok green' \
+	'system,test.authbad red' \
+	'system,test.netrcok green' \
+	'system,test.netrcbad red' \
+	'system,test.headok green' \
+	'system,test.headbad red' \
+	'system,test.statusok green' \
+	'system,test.statusbad red' \
+	'system,test.contentok green' \
+	'system,test.contentbad red' \
+	'system,test.absentok green' \
+	'system,test.absentbad red' \
+	'system,test.typeok green' \
+	'system,test.typebad red' \
+	'system,test.postok green' \
+	'system,test.postbad red' \
+	'system,test.nopostok green' \
+	'system,test.nopostbad red' \
+	'system,test.soapok green' \
+	'system,test.soapbad red' \
+	'system,test.nosoapok green' \
+	'system,test.nosoapbad red' \
+	'data system,test.apache' \
+	'system,test.ssh green' \
+	'system,test.qmtp green' \
+	'system,test.qmtp red' \
+	'system,test.ftp green' \
+	'system,test.ftp red' \
+	'system,test.smtp red' \
+	'system,test.telnet green' \
 	'bannerbad,test.ssh yellow' \
-	'valgrind,test.conn green' \
+	'system,test.conn green' \
 	'pingfail,test.conn clear' \
 	'pingreverse,test.conn red'
 do
@@ -201,9 +201,9 @@ grep -Fq 'xymonnet telnet login:' "$work/xymonnet.out" || {
 
 if [[ $tls_port != 0 ]]; then
 	for tls_expected in \
-		'valgrind,test.ftps green' \
-		'valgrind,test.ftps red' \
-		'valgrind,test.sslcert green' \
+		'system,test.ftps green' \
+		'system,test.ftps red' \
+		'system,test.sslcert green' \
 		'certfail,test.sslcert red'
 	do
 		grep -Fq "$tls_expected" "$work/xymonnet.out" || {
@@ -215,7 +215,7 @@ if [[ $tls_port != 0 ]]; then
 fi
 
 if [[ $https_port != 0 ]]; then
-	grep -Fq 'valgrind,test.httpsok green' "$work/xymonnet.out" || {
+	grep -Fq 'system,test.httpsok green' "$work/xymonnet.out" || {
 		cat "$work/xymonnet.out" >&2
 		cat "$work/xymonnet.err" >&2
 		fail "missing successful HTTPS result"
@@ -224,8 +224,8 @@ fi
 
 if [[ $mtls_port != 0 ]]; then
 	for certauth_expected in \
-		'valgrind,test.certauthok green' \
-		'valgrind,test.certauthbad red'
+		'system,test.certauthok green' \
+		'system,test.certauthbad red'
 	do
 		grep -Fq "$certauth_expected" "$work/xymonnet.out" || {
 			cat "$work/xymonnet.out" >&2
@@ -237,7 +237,7 @@ fi
 
 if [[ $ntp_ready = 1 ]]; then
 	for ntp_expected in \
-		'valgrind,test.ntp green' \
+		'system,test.ntp green' \
 		'ntpfail,test.ntp red' \
 		'NTP server 127.0.0.1 is synchronised'
 	do
@@ -250,12 +250,12 @@ if [[ $ntp_ready = 1 ]]; then
 fi
 
 if [[ $dns_ready = 1 ]]; then
-	[[ $(grep -Fc 'valgrind,test.dns green' "$work/xymonnet.out") = 2 ]] || {
+	[[ $(grep -Fc 'system,test.dns green' "$work/xymonnet.out") = 2 ]] || {
 		cat "$work/xymonnet.out" >&2
 		cat "$work/xymonnet.err" >&2
 		fail "expected successful dns and dig reports"
 	}
-	[[ $(grep -Fc 'valgrind,test.dns red' "$work/xymonnet.out") = 2 ]] || {
+	[[ $(grep -Fc 'system,test.dns red' "$work/xymonnet.out") = 2 ]] || {
 		cat "$work/xymonnet.out" >&2
 		cat "$work/xymonnet.err" >&2
 		fail "expected failed dns and dig reports"
@@ -266,7 +266,7 @@ fi
 
 if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 	for ldap_expected in \
-		'valgrind,test.ldap green' \
+		'system,test.ldap green' \
 		'ldapfail,test.ldap red' \
 		'ldaptlsfail,test.ldap red' \
 		'ldapauth,test.ldap green' \
@@ -282,9 +282,9 @@ if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 	done
 fi
 
-[[ $(grep -Fc 'valgrind,test.ssh green' "$work/xymonnet.out") = 2 ]] ||
+[[ $(grep -Fc 'system,test.ssh green' "$work/xymonnet.out") = 2 ]] ||
 	fail "expected successful reports for the positive and reverse SSH checks"
-[[ $(grep -Fc 'valgrind,test.ssh red' "$work/xymonnet.out") = 2 ]] ||
+[[ $(grep -Fc 'system,test.ssh red' "$work/xymonnet.out") = 2 ]] ||
 	fail "expected failed reports for the positive and reverse SSH checks"
 
 if [[ ${XYMONNET_VALGRIND:-0} = 1 ]]; then

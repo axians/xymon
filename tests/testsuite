@@ -1,7 +1,7 @@
 #!/bin/sh
 #
-# Run every executable regression test under tests/. Exit 0 if at least one
-# test passed and none failed; 1 if any failed; 77 if every test skipped
+# Run executable tests from the selected catalog. Exit 0 if at least one test
+# passed and none failed; 1 if any failed; 77 if every test skipped
 # (suite verified nothing -- see the all-skip note near the end). Individual
 # tests follow the tests/README.md contract: exit 0 = pass, 77 = skip,
 # anything else = fail.
@@ -10,7 +10,9 @@
 # Actions ($GITHUB_ACTIONS=true), plain human-readable output otherwise. Both
 # the CI workflow and a developer run the same code path.
 #
-# Usage: ./tests/testsuite        (from anywhere; resolves the repo root itself)
+# Usage: ./tests/testsuite               (regression tests)
+#        ./tests/testsuite system        (full-system scenarios)
+#        ./tests/testsuite all           (both catalogs)
 #        make test
 #
 set -u
@@ -18,6 +20,28 @@ set -u
 # Resolve the repo root from this script's own location, so it works from any cwd.
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd) || exit 2
 cd "$root" || exit 2
+
+if [ "$#" -gt 1 ]; then
+	printf 'Usage: %s [regression|system|all]\n' "$0" >&2
+	exit 2
+fi
+
+catalog=${1:-regression}
+case $catalog in
+	regression) test_root=tests ;;
+	system)     test_root=tests/system ;;
+	all)        test_root=tests ;;
+	*)
+		printf 'Unknown test catalog: %s\n' "$catalog" >&2
+		printf 'Usage: %s [regression|system|all]\n' "$0" >&2
+		exit 2
+		;;
+esac
+
+if [ ! -d "$test_root" ]; then
+	printf 'Test catalog directory not found: %s\n' "$test_root" >&2
+	exit 1
+fi
 
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then gh=1; else gh=0; fi
 
@@ -41,8 +65,10 @@ errline() {
 	if [ "$gh" = 1 ]; then printf '::error::%s\n' "$1"; else printf 'FAIL: %s\n' "$1"; fi
 }
 
-# Discover executable *.sh under tests/. Sourced helpers (tests/lib/) and shared
-# data (tests/fixtures/) are not +x, so they are not picked up -- see README.
+# Discover executable *.sh in the selected catalog. Sourced helpers (tests/lib/)
+# and shared data (tests/fixtures/) are not +x, so they are not picked up. The
+# regression catalog excludes tests/system/; system component directories are
+# discovered recursively, so adding one does not require a runner change.
 # This runner has no .sh extension, so it never discovers itself.
 #
 # The explicit lib/ and fixtures/ excludes back up the exec-bit rule on
@@ -50,15 +76,21 @@ errline() {
 # core.fileMode=false): there, a shebang-less helper like lib/assert.sh would
 # otherwise be discovered, run as sh, define its functions, exit 0 -- and count
 # as a pass that verified nothing.
-tests=$(find tests -type f -name '*.sh' -perm -u+x \
-	! -path 'tests/lib/*' ! -path 'tests/fixtures/*' | sort)
+if [ "$catalog" = regression ]; then
+	tests=$(find "$test_root" -type f -name '*.sh' -perm -u+x \
+		! -path 'tests/lib/*' ! -path 'tests/fixtures/*' \
+		! -path 'tests/system/*' | sort)
+else
+	tests=$(find "$test_root" -type f -name '*.sh' -perm -u+x \
+		! -path 'tests/lib/*' ! -path 'tests/fixtures/*' | sort)
+fi
 
 # Zero discovered tests is a failure, not a quiet success: the runner ships
 # alongside the tests, so an empty result means something is wrong -- lost
 # executable bits, a packaging omission, or a broken discovery path -- and
 # treating it as green would let CI go green while running nothing.
 if [ -z "$tests" ]; then
-	errline "No executable tests found under tests/ (lost +x bit, packaging omission, or broken discovery)"
+	errline "No executable tests found in the $catalog catalog (lost +x bit, packaging omission, or broken discovery)"
 	exit 1
 fi
 
@@ -85,7 +117,7 @@ done <<EOF
 $tests
 EOF
 
-printf '\n----- summary -----\n'
+printf '\n----- %s summary -----\n' "$catalog"
 printf 'passed:  %d\n' "$pass"
 printf 'skipped: %d\n' "$skip"
 printf 'failed:  %d\n' "$fail"

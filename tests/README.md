@@ -13,41 +13,56 @@ From a fresh checkout, no build required:
 
     ./tests/testsuite
 
-It discovers every executable `tests/**/*.sh`, runs each, and prints a
-pass/skip/fail summary (exit `0` = pass, `77` = skip, anything else = fail).
-Output adapts on its own: plain text on a terminal, GitHub Actions annotations
-under CI — the workflow and a developer run the exact same runner.
+This runs the regression catalog: every executable `tests/**/*.sh` except
+entries below `tests/system/`. It prints a pass/skip/fail summary (exit `0` =
+pass, `77` = skip, anything else = fail). Output adapts on its own: plain text
+on a terminal, GitHub Actions annotations under CI — the workflow and a
+developer run the exact same runner.
+
+Full-system scenarios have their own catalog. They drive complete built
+binaries against deterministic local services and can take longer or require
+additional host capabilities:
+
+  ./tests/testsuite system
+
+Use `./tests/testsuite all` to run both catalogs explicitly. System tests are
+organised by component below `tests/system/`; the runner discovers new
+component directories recursively without needing a hard-coded list.
 
 Once the tree is configured, `make test` runs the same thing. A single
 test also runs standalone — what reviewers do:
 
     ./tests/client/fs-filter-linux.sh
 
-The full `xymonnet` loopback scenario runs after `xymonnet` has been built:
+Select another catalog through Make with `make test TEST_CATALOG=system`.
 
-  ./tests/network/xymonnet-loopback.sh
+The full `xymonnet` system scenario runs after `xymonnet` has been built:
 
-For a reproducible Ubuntu build and Memcheck run, use the opt-in Podman
-launcher. It copies the read-only source mount into the container before
-configuring and building, so it does not modify the checkout. The container
-also starts OpenLDAP, DNS, NTP, HTTP(S), TCP, TLS, and telnet fixtures. The
-loopback matrix covers 58 probes, including authenticated LDAP searches,
-LDAPv3 STARTTLS, HTTP passwords from hosts.cfg URLs and netrc, TLS client
-certificate authentication, HTTP redirects, strict TCP response checking,
-telnet negotiation, and positive, dial-up, and reverse ping checks.
-Green behaviors are paired with deterministic failure paths:
+  ./tests/system/network/xymonnet-loopback.sh
 
-  ./build/xymonnet-valgrind-podman.sh
+For a reproducible Ubuntu build and native system run, use the Podman launcher.
+It copies the read-only source mount into the container before configuring and
+building, so it does not modify the checkout. The container also starts
+OpenLDAP, DNS, NTP, HTTP(S), TCP, TLS, and telnet fixtures. The loopback matrix
+covers 58 probes, including authenticated LDAP searches, LDAPv3 STARTTLS, HTTP
+passwords from hosts.cfg URLs and netrc, TLS client certificate authentication,
+HTTP redirects, strict TCP response checking, telnet negotiation, and positive,
+dial-up, and reverse ping checks. Green behaviors are paired with deterministic
+failure paths:
 
-Set `XYMONNET_VALGRIND=0` to run the same containerized scenario without
-Memcheck when debugging fixture or functional failures.
+  ./build/xymonnet-system-podman.sh
+
+Valgrind is not enabled by default in either catalog. Request Memcheck
+explicitly for the same containerized scenario:
+
+  XYMONNET_VALGRIND=1 ./build/xymonnet-system-podman.sh
 
 The launcher keeps APT packages and index lists in the named Podman volumes
-`xymonnet-valgrind-apt-cache` and `xymonnet-valgrind-apt-lists`. Override the
-names with `XYMON_VALGRIND_APT_CACHE_VOLUME` and
-`XYMON_VALGRIND_APT_LISTS_VOLUME`, or clear the defaults with:
+`xymonnet-system-apt-cache` and `xymonnet-system-apt-lists`. Override the names
+with `XYMON_SYSTEM_APT_CACHE_VOLUME` and `XYMON_SYSTEM_APT_LISTS_VOLUME`, or
+clear the defaults with:
 
-  podman volume rm xymonnet-valgrind-apt-cache xymonnet-valgrind-apt-lists
+  podman volume rm xymonnet-system-apt-cache xymonnet-system-apt-lists
 
 `bash` is a hard prerequisite of the suite (every test uses it; see
 Conventions). The runner itself is POSIX sh, and on a host without bash it
@@ -77,12 +92,14 @@ shipped-file invariants) get their own area.
 | `tests/web/`      | CGIs, HTML rendering paths                             |
 | `tests/packaging/`| cross-cutting: shipped files, paths, generated configs |
 | `tests/buildsystem/` | parallel make, configure probes, CMake feature detection |
-| `tests/integration/` | end-to-end scenarios spanning multiple components   |
+| `tests/system/<component>/` | full built binaries with local service fixtures |
 | `tests/lib/`      | sourced helpers (`assert.sh`, future `net.sh` etc.)    |
 | `tests/fixtures/` | shared data files (config snippets, expected outputs)  |
 
-Add a new area by PR when an existing one doesn't fit. Don't bend a
-test to fit the wrong area just to avoid creating a new directory.
+Add a new area by PR when an existing one doesn't fit. Don't bend a test to fit
+the wrong area just to avoid creating a new directory. A system scenario goes
+under the component it exercises, such as `tests/system/server/` or
+`tests/system/web/`; adding that directory requires no runner change.
 
 ### Runnable vs sourced/data files
 
@@ -166,16 +183,18 @@ maintenance.
 
 ## How to add a regression scenario
 
-1. Pick the area: `tests/<area>/<scenario>.sh`. Create the subdirectory
-   if needed.
+1. Pick the catalog and area. Focused regressions use
+  `tests/<area>/<scenario>.sh`; complete built-binary scenarios use
+  `tests/system/<component>/<scenario>.sh`. Create the subdirectory if needed.
 2. Copy the SPDX header and the strict-mode preamble from any existing
    test as a starting point.
 3. Source the helpers: `. "$(dirname "$0")/../lib/assert.sh"`.
 4. Drive the scenario: set up fixtures in a temp dir, invoke the
    binary or script under test, assert on its output / exit code /
    side effects.
-5. Run it standalone. If it passes locally and is deterministic, open
-   the PR. CI will run it on every push.
+5. Run it standalone and through its catalog. If it passes locally and is
+  deterministic, open the PR. The default CI runs the regression catalog;
+  system scenarios can be run together with `./tests/testsuite system`.
 
 ## Why no framework
 
