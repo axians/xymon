@@ -200,6 +200,7 @@ extern unsigned int tcp_stats_connects;
 extern char *init_tcp_services(void);
 extern int default_tcp_port(char *svcname);
 extern void dump_tcp_services(void);
+extern void parse_ssl_dialect_suffix(const char *suffix, ssloptions_t *opts);
 extern tcptest_t *add_tcp_test(char *ip, int port, char *service, ssloptions_t *sslopt, char *srcip,
 			    char *tspec, int silent, unsigned char *reqmsg, 
 			    void *priv, f_callback_data datacallback, f_callback_final finalcallback);

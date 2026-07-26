@@ -29,6 +29,10 @@
 typedef struct {
 	void   *ldapdesc;		/* Result from ldap_url_parse() */
 	int    usetls;
+	void   *sslopt;			/* ssloptions_t*, from an SSL dialect suffix
+					   on the URL scheme (e.g. "ldapsc://"),
+					   or NULL. Opaque here to avoid pulling
+					   in contest.h just for the type. */
 
 	int    skiptest;		/* Skip check if failed TCP connect */
 	int    ldapstatus;		/* Status from library of the ldap transaction */
@@ -49,6 +53,7 @@ extern char *ldap_library_version;
 extern int  init_ldap_library(void);
 extern void shutdown_ldap_library(void);
 
+extern int  is_ldap_url(const char *testspec);
 extern int  add_ldap_test(testitem_t *t);
 extern void run_ldap_tests(service_t *ldaptest, int sslcertcheck, int timeout);
 extern void show_ldap_test_results(service_t *ldaptest);

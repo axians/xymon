@@ -272,13 +272,70 @@ service_t *add_service(char *name, int port, int namelen, int toolid)
 
 	svc = (service_t *) malloc(sizeof(service_t));
 	svc->portnum = port;
-	svc->testname = strdup(name); 
+	svc->testname = strdup(name);
 	svc->toolid = toolid;
 	svc->namelen = namelen;
 	svc->items = NULL;
+	svc->sslopt = NULL;
 	xtreeAdd(svctree, svc->testname, svc);
 
 	return svc;
+}
+
+/*
+ * Base service names that support the hosts.cfg(5) SSL "dialect" suffix
+ * convention already documented for the http/https scheme (e.g. "httpsc"
+ * forces TLSv1.2), when used as a bare colon-port testspec instead of a
+ * URL -- e.g. "ftpsc:990" or "imapsd". Kept as an explicit allowlist rather
+ * than stripping trailing dialect-alphabet characters from any unrecognized
+ * service name, so a real (if oddly named) protocols.cfg service is never
+ * misparsed as a dialect variant of something else.
+ */
+static char *ssl_dialect_bases[] = { "ftps", "telnets", "smtps", "pop3s", "imaps", "nntps", "ldaps", NULL };
+
+static service_t *resolve_ssl_dialect_service(char *token)
+{
+	int i;
+
+	for (i = 0; ssl_dialect_bases[i]; i++) {
+		char *base = ssl_dialect_bases[i];
+		size_t baselen = strlen(base);
+		char *suffix;
+		xtreePos_t handle;
+		service_t *baseservice, *svc;
+
+		if (strncmp(token, base, baselen) != 0) continue;
+		suffix = token + baselen;
+		/* Empty suffix means this is just the plain base name, which the
+		 * caller already looked up (and failed to find) before falling
+		 * back here -- so this can't be a genuine dialect variant. */
+		if (*suffix == '\0') continue;
+		if (strspn(suffix, "23tabcdmh") != strlen(suffix)) continue;
+
+		handle = xtreeFind(svctree, base);
+		if (handle == xtreeEnd(svctree)) continue;
+		baseservice = (service_t *)xtreeData(svctree, handle);
+
+		/*
+		 * namelen = strlen(base), not strlen(token): the same convention
+		 * "specialport" uses above. The dispatch loop in main() truncates
+		 * s->testname to namelen bytes before passing it to add_tcp_test()
+		 * as both the svcinfo lookup key and the reported column name --
+		 * so this recovers the real protocol name ("ftps") for svcinfo
+		 * lookup, and reports under that same name, exactly like the
+		 * bare http/https dialect suffixes already do (the suffix only
+		 * changes behavior, not the default column name).
+		 */
+		svc = add_service(token, baseservice->portnum, baselen, TOOL_CONTEST);
+		if (!svc->sslopt) {
+			ssloptions_t *opts = (ssloptions_t *) calloc(1, sizeof(ssloptions_t));
+			parse_ssl_dialect_suffix(suffix, opts);
+			svc->sslopt = opts;
+		}
+		return svc;
+	}
+
+	return NULL;
 }
 
 int getportnumber(char *svcname)
@@ -544,7 +601,7 @@ void load_tests(void)
 					}
 					s = NULL; /* Don't add the test now - ping is special (enabled by default) */
 				}
-				else if ((argnmatch(testspec, "ldap://")) || (argnmatch(testspec, "ldaps://"))) {
+				else if (is_ldap_url(testspec)) {
 					/*
 					 * LDAP test. This uses ':' a lot, so save it here.
 					 */
@@ -663,6 +720,7 @@ void load_tests(void)
 					/* Find the service */
 					handle = xtreeFind(svctree, testspec);
 					s = ((handle == xtreeEnd(svctree)) ? NULL : (service_t *)xtreeData(svctree, handle));
+					if (!s) s = resolve_ssl_dialect_service(testspec);
 					if (option && s) {
 						/*
 						 * Check if it is a service with an explicit portnumber.
@@ -697,9 +755,25 @@ void load_tests(void)
 						}
 
 						if (specialport) {
+							/*
+							 * s->namelen is normally 0 here (s is a plain
+							 * base service from load_services()), so this
+							 * just recovers strlen(s->testname) as before.
+							 * But if s is itself already a dialect-suffixed
+							 * service_t (see resolve_ssl_dialect_service()),
+							 * s->testname (e.g. "ftpsd") is longer than the
+							 * real protocol name ("ftps") it needs to keep
+							 * resolving to -- s->namelen already holds that
+							 * true length, so reuse it instead of
+							 * recomputing a now-wrong one from testname.
+							 */
+							int truncname = (s->namelen ? s->namelen : (int)strlen(s->testname));
+							void *inheritedsslopt = s->sslopt;
+
 							SBUF_MALLOC(specialname, strlen(s->testname)+10);
 							snprintf(specialname, specialname_buflen,"%s_%d", s->testname, specialport);
-							s = add_service(specialname, specialport, strlen(s->testname), TOOL_CONTEST);
+							s = add_service(specialname, specialport, truncname, TOOL_CONTEST);
+							if (!s->sslopt) s->sslopt = inheritedsslopt;
 							xfree(specialname);
 						}
 					}
@@ -2416,9 +2490,10 @@ int main(int argc, char *argv[])
 				if (!t->host->dnserror) {
 					strncpy(tname, s->testname, sizeof(tname));
 					if (s->namelen) tname[s->namelen] = '\0';
-					t->privdata = (void *)add_tcp_test(ip_to_test(t->host), s->portnum, tname, NULL,
+					t->privdata = (void *)add_tcp_test(ip_to_test(t->host), s->portnum, tname,
+									   (ssloptions_t *)s->sslopt,
 									   t->srcip,
-									   NULL, t->silenttest, NULL, 
+									   NULL, t->silenttest, NULL,
 									   NULL, NULL, NULL);
 				}
 			}

@@ -67,6 +67,9 @@ typedef struct service_t {
 	int portnum;		/* Port number this service runs on */
 	enum toolid_t toolid;	/* Which tool to use */
 	struct testitem_t *items; /* testitem_t linked list of tests for this service */
+	void *sslopt;		/* ssloptions_t* (opaque here to avoid an include-order
+				   dependency on contest.h) for services created from a
+				   dialect-suffixed name, e.g. "ftpsc" -- NULL otherwise */
 } service_t;
 
 enum multiping_t { MULTIPING_BEST, MULTIPING_WORST };

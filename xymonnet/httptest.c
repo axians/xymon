@@ -486,16 +486,11 @@ void add_http_test(testitem_t *t)
 	}
 
 	if (httptest->weburl.desturl->schemeopts) {
-		if      (strstr(httptest->weburl.desturl->schemeopts, "3"))      sslopt_version = SSLVERSION_V3;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "2"))      sslopt_version = SSLVERSION_V2;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "t"))      sslopt_version = SSLVERSION_TLS10;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "a"))      sslopt_version = SSLVERSION_TLS10;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "b"))      sslopt_version = SSLVERSION_TLS11;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "c"))      sslopt_version = SSLVERSION_TLS12;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "d"))      sslopt_version = SSLVERSION_TLS13;
+		ssloptions_t schemeopts = { NULL, SSLVERSION_DEFAULT, NULL, NULL };
 
-		if      (strstr(httptest->weburl.desturl->schemeopts, "h"))      sslopt_ciphers = ciphershigh;
-		else if (strstr(httptest->weburl.desturl->schemeopts, "m"))      sslopt_ciphers = ciphersmedium;
+		parse_ssl_dialect_suffix(httptest->weburl.desturl->schemeopts, &schemeopts);
+		sslopt_version = schemeopts.sslversion;
+		sslopt_ciphers = schemeopts.cipherlist;
 
 		if      (strstr(httptest->weburl.desturl->schemeopts, "10"))     httpversion    = HTTPVER_10;
 		else if (strstr(httptest->weburl.desturl->schemeopts, "11"))     httpversion    = HTTPVER_11;

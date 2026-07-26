@@ -912,7 +912,7 @@ listener (oratns), qmail QMTP and QMQP protocols.
 
 .IP "ftps telnets smtps pop3s imaps nntps"
 These tags are for testing of the SSL-tunneled versions of
-the standard ftp, telnet, smtp, pop3, imap and nntp protocols. 
+the standard ftp, telnet, smtp, pop3, imap and nntp protocols.
 If Xymon was configured with support for SSL, you can test these
 services like any other network service - xymonnet will
 setup an SSL-encrypted session while testing the service.
@@ -920,6 +920,14 @@ The server certificate is validated and information about
 it sent in the "sslcert" column. Note that smtps does not
 have a standard port number assignment, so you will need to enter
 this into the protocols.cfg file or your /etc/services file.
+.LP
+These services also accept the same SSL/TLS version and cipher-strength
+"dialect" suffixes as the http/https tests (see "Forcing an HTTP or SSL
+version" below), appended directly to the tag name instead of the URL
+scheme, e.g. "ftpsc:990" to require TLSv1.2, or "imapshd" to require
+TLSv1.3 with high-strength ciphers. The suffix only changes which SSL/TLS
+dialect is used; the test is still reported under the base tag's column
+("ftps", "imaps", etc.), not the suffixed name.
 
 .IP bbd
 Test that a Big Brother compatible daemon is running. This check
@@ -1080,6 +1088,13 @@ TLS1.2 and HTTP 1.0 you would use "httpsc10".
 
 Note that SSLv2 support is disabled in all current OpenSSL releases.
 TLS version-specific scheme testing requires OpenSSL 1.0.1 or higher.
+
+The SSL/TLS version and cipher-strength suffixes ("2", "3", "t", "a", "b",
+"c", "d", "m", "h" -- but not the HTTP-version-only "10"/"11") are also
+accepted by the ftps/telnets/smtps/pop3s/imaps/nntps tags (appended to the
+tag name, see above) and by the ldap/ldaps URL tests below (appended to the
+URL scheme, e.g. "ldapsc://..." to require TLSv1.2). They have no effect on
+plain "ldap" or non-SSL tags.
 
 .IP "Testing sites by IP-address"
 xymonnet ignores the "testip" tag normally used to force a 
@@ -1390,6 +1405,22 @@ an LDAP server that requires TLS encryption. See
 .I xymonnet(1)
 for a discussion of the different ways of running LDAP servers
 with SSL/TLS, and which of these are supported by xymonnet.
+
+The same SSL/TLS version and cipher-strength dialect suffixes documented
+under "Forcing an HTTP or SSL version" above can be appended to the
+"ldaps" scheme, e.g. "ldapsc://hostport/dn" to require TLSv1.2, or
+"ldapshd://hostport/dn" to require TLSv1.3 with high-strength ciphers.
+
+Note: xymonnet asks the OpenLDAP library to enforce the requested SSL/TLS
+version via the standard LDAP_OPT_X_TLS_PROTOCOL_MIN/MAX options. On
+OpenLDAP builds linked against OpenSSL (common on RHEL-family systems)
+this is enforced as expected. On OpenLDAP builds linked against GnuTLS
+(the default on Debian and Ubuntu), OpenLDAP may accept the option
+without actually enforcing it during the handshake -- a known limitation
+of OpenLDAP's GnuTLS backend, not something xymonnet can detect or work
+around. Check what TLS library your libldap is linked against (e.g.
+"ldd $(which ldapsearch) | grep -i 'ssl\\|gnutls'") before relying on
+this for compliance testing against ldaps:// targets.
 
 .IP ldaplogin=username:password
 Define a username and password to use when binding to the LDAP

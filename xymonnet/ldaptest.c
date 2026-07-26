@@ -24,7 +24,12 @@ static char rcsid[] = "$Id$";
 #include "libxymon.h"
 
 #include "xymonnet.h"
+#include "contest.h"
 #include "ldaptest.h"
+
+/* Dialect-suffix alphabet shared with the http/https scheme convention
+ * (hosts.cfg(5)): SSL version letters plus cipher-strength letters. */
+#define LDAP_DIALECT_CHARS "23tabcdmh"
 
 #define XYMON_LDAP_OK 		0
 #define XYMON_LDAP_INITFAIL	10
@@ -57,6 +62,17 @@ void shutdown_ldap_library(void)
 #endif
 }
 
+int is_ldap_url(const char *testspec)
+{
+	const char *p = testspec;
+
+	if (strncmp(p, "ldap", 4) != 0) return 0;
+	p += 4;
+	if (*p == 's') p++;
+	while (*p && strchr(LDAP_DIALECT_CHARS, *p)) p++;
+	return (strncmp(p, "://", 3) == 0);
+}
+
 int add_ldap_test(testitem_t *t)
 {
 #ifdef HAVE_LDAP
@@ -65,21 +81,57 @@ int add_ldap_test(testitem_t *t)
 	LDAPURLDesc *ludp;
 	char *urltotest;
 	int badurl;
+	int usetls;
+	char suffix[16];
+	int suffixlen;
 
 	basecheck = (testitem_t *)t->privdata;
 
-	/* 
+	/*
 	 * t->testspec containts the full testspec
 	 * We need to remove any URL-encoding.
 	 */
 	urltotest = urlunescape(t->testspec);
+	usetls = (strncmp(urltotest, "ldaps", 5) == 0);
+
+	/*
+	 * Strip an optional SSL "dialect" suffix (hosts.cfg(5) convention
+	 * documented for http/https, e.g. "ldapsc://" forces TLSv1.2) before
+	 * handing the URL to ldap_url_parse(), which only recognizes the
+	 * bare "ldap"/"ldaps" schemes.
+	 */
+	suffixlen = 0;
+	suffix[0] = '\0';
+	{
+		char *suffixstart = urltotest + (usetls ? 5 : 4);
+		char *p = suffixstart;
+
+		while (*p && strchr(LDAP_DIALECT_CHARS, *p)) p++;
+		suffixlen = p - suffixstart;
+		if (suffixlen > 0) {
+			if ((size_t)suffixlen < sizeof(suffix)) {
+				memcpy(suffix, suffixstart, suffixlen);
+				suffix[suffixlen] = '\0';
+			}
+			/* Rewrite in place: shift the "://..." remainder left over
+			 * the suffix. urltotest only shrinks, so this fits. */
+			memmove(suffixstart, p, strlen(p) + 1);
+		}
+	}
+
 	badurl = (ldap_url_parse(urltotest, &ludp) != 0);
 
 	/* Allocate the private data and initialize it */
-	t->privdata = (void *) calloc(1, sizeof(ldap_data_t)); 
+	t->privdata = (void *) calloc(1, sizeof(ldap_data_t));
 	req = (ldap_data_t *) t->privdata;
 	req->ldapdesc = (void *) ludp;
-	req->usetls = (strncmp(urltotest, "ldaps:", 6) == 0);
+	req->usetls = usetls;
+	req->sslopt = NULL;
+	if (suffix[0]) {
+		ssloptions_t *opts = (ssloptions_t *) calloc(1, sizeof(ssloptions_t));
+		parse_ssl_dialect_suffix(suffix, opts);
+		req->sslopt = opts;
+	}
 	if (req->usetls && (ludp->lud_port == LDAPS_PORT)) {
 		dbgprintf("Forcing port %d for ldaps with STARTTLS\n", LDAP_PORT );
 		ludp->lud_port = LDAP_PORT;
@@ -126,6 +178,21 @@ static void ldap_alarmhandler(int signum)
 {
 	signal(signum, SIG_DFL);
 	connect_timeout = 1;
+}
+#endif
+
+#ifdef LDAP_OPT_X_TLS_PROTOCOL_MIN
+static int ldap_tls_protocol_version(int sslversion)
+{
+	switch (sslversion) {
+	  case SSLVERSION_V2:    return LDAP_OPT_X_TLS_PROTOCOL_SSL2;
+	  case SSLVERSION_V3:    return LDAP_OPT_X_TLS_PROTOCOL_SSL3;
+	  case SSLVERSION_TLS10: return LDAP_OPT_X_TLS_PROTOCOL_TLS1_0;
+	  case SSLVERSION_TLS11: return LDAP_OPT_X_TLS_PROTOCOL_TLS1_1;
+	  case SSLVERSION_TLS12: return LDAP_OPT_X_TLS_PROTOCOL_TLS1_2;
+	  case SSLVERSION_TLS13: return LDAP_OPT_X_TLS_PROTOCOL_TLS1_3;
+	  default:               return 0;
+	}
 }
 #endif
 
@@ -225,6 +292,35 @@ void run_ldap_tests(service_t *ldaptest, int sslcertcheck, int querytimeout)
 #endif
 
 		if (req->usetls) {
+#ifdef LDAP_OPT_X_TLS_PROTOCOL_MIN
+			ssloptions_t *sslopt = (ssloptions_t *) req->sslopt;
+
+			if (sslopt) {
+				int newctx = 0;
+
+				if (sslopt->sslversion != SSLVERSION_DEFAULT) {
+					int proto = ldap_tls_protocol_version(sslopt->sslversion);
+
+					ldap_set_option(ld, LDAP_OPT_X_TLS_PROTOCOL_MIN, &proto);
+#ifdef LDAP_OPT_X_TLS_PROTOCOL_MAX
+					ldap_set_option(ld, LDAP_OPT_X_TLS_PROTOCOL_MAX, &proto);
+#endif
+				}
+				if (sslopt->cipherlist) {
+					ldap_set_option(ld, LDAP_OPT_X_TLS_CIPHER_SUITE, sslopt->cipherlist);
+				}
+				/* Per-handle TLS options above only take effect once a
+				 * new TLS library context is built for this handle. Note:
+				 * on OpenLDAP builds linked against GnuTLS (the default on
+				 * Debian/Ubuntu), PROTOCOL_MIN/MAX may be accepted here
+				 * (ldap_set_option() returns success) without actually
+				 * being enforced during the handshake -- a known gap in
+				 * OpenLDAP's GnuTLS backend, not something xymonnet can
+				 * detect or work around. Builds linked against OpenSSL
+				 * (e.g. RHEL-family) do not have this limitation. */
+				ldap_set_option(ld, LDAP_OPT_X_TLS_NEWCTX, &newctx);
+			}
+#endif
 			dbgprintf("Trying to enable TLS for session\n");
 			if ((rc = ldap_start_tls_s(ld, NULL, NULL)) != LDAP_SUCCESS) {
 				dbgprintf("ldap_start_tls failed\n");

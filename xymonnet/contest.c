@@ -72,6 +72,31 @@ static svcinfo_t svcinfo_http  = { "http", NULL, 0, NULL, 0, 0, (TCP_GET_BANNER|
 static svcinfo_t svcinfo_https = { "https", NULL, 0, NULL, 0, 0, (TCP_GET_BANNER|TCP_HTTP|TCP_SSL), 443 };
 static ssloptions_t default_sslopt = { NULL, SSLVERSION_DEFAULT, NULL, NULL };
 
+/*
+ * Shared "dialect" suffix parser for the hosts.cfg(5) SSL version/cipher
+ * forcing convention (documented for the http/https scheme, e.g. "httpsc"
+ * forces TLSv1.2). SUFFIX is just the dialect letters -- the caller has
+ * already stripped the base scheme/service name off. Only sets sslversion
+ * and cipherlist; leaves any other fields in OPTS untouched, so the caller
+ * should have zero-initialized OPTS first (or be reusing an existing one
+ * with clientcert/alpns already set, e.g. from an HTTP URL).
+ */
+void parse_ssl_dialect_suffix(const char *suffix, ssloptions_t *opts)
+{
+	if (!suffix) return;
+
+	if      (strstr(suffix, "3")) opts->sslversion = SSLVERSION_V3;
+	else if (strstr(suffix, "2")) opts->sslversion = SSLVERSION_V2;
+	else if (strstr(suffix, "t")) opts->sslversion = SSLVERSION_TLS10;
+	else if (strstr(suffix, "a")) opts->sslversion = SSLVERSION_TLS10;
+	else if (strstr(suffix, "b")) opts->sslversion = SSLVERSION_TLS11;
+	else if (strstr(suffix, "c")) opts->sslversion = SSLVERSION_TLS12;
+	else if (strstr(suffix, "d")) opts->sslversion = SSLVERSION_TLS13;
+
+	if      (strstr(suffix, "h")) opts->cipherlist = ciphershigh;
+	else if (strstr(suffix, "m")) opts->cipherlist = ciphersmedium;
+}
+
 static time_t sslcert_expiretime(char *timestr)
 {
 	int res;
