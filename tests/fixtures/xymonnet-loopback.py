@@ -37,6 +37,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_fixture(404, b"not found\n")
         elif self.path == "/error":
             self.send_fixture(500, b"internal error\n")
+        elif self.path == "/httpversion":
+            self.send_fixture(body=self.request_version.encode("ascii") + b"\n")
         elif self.path == "/json":
             self.send_fixture(
                 body=b'{"status":"ok"}\n', content_type="application/json"
@@ -208,6 +210,7 @@ def main():
     tls_context = None
     httpsd = None
     mtlsd = None
+    tls12d = None
     if len(sys.argv) == 4:
         tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         tls_context.load_cert_chain(sys.argv[2], sys.argv[3])
@@ -223,6 +226,17 @@ def main():
         mtlsd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         mtlsd.socket = mtls_context.wrap_socket(
             mtlsd.socket, server_side=True
+        )
+        # Pinned to TLSv1.2 only, so tests can prove xymonnet's "c"/"d"
+        # scheme-suffix version forcing actually constrains the handshake,
+        # not just that some default TLS version happens to work.
+        tls12_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls12_context.load_cert_chain(sys.argv[2], sys.argv[3])
+        tls12_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        tls12_context.maximum_version = ssl.TLSVersion.TLSv1_2
+        tls12d = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        tls12d.socket = tls12_context.wrap_socket(
+            tls12d.socket, server_side=True
         )
 
     dns_socket = None
@@ -240,6 +254,7 @@ def main():
         tls_port = tls_listener.getsockname()[1] if tls_listener else 0
         https_port = httpsd.server_port if httpsd else 0
         mtls_port = mtlsd.server_port if mtlsd else 0
+        tls12_port = tls12d.server_port if tls12d else 0
         dns_ready = "1" if dns_socket else ""
         ntp_ready = "1" if ntp_socket else ""
         ready.write(
@@ -248,7 +263,7 @@ def main():
             f"{ftp_listener.getsockname()[1]} "
             f"{telnet_listener.getsockname()[1]} {tls_port} {https_port} "
             f"{mtls_port} {dns_ready or '0'} {ntp_ready or '0'} "
-            f"{empty_listener.getsockname()[1]}\n"
+            f"{empty_listener.getsockname()[1]} {tls12_port}\n"
         )
 
     threading.Thread(
@@ -280,6 +295,8 @@ def main():
         threading.Thread(target=httpsd.serve_forever, daemon=True).start()
     if mtlsd:
         threading.Thread(target=mtlsd.serve_forever, daemon=True).start()
+    if tls12d:
+        threading.Thread(target=tls12d.serve_forever, daemon=True).start()
     if dns_socket:
         threading.Thread(
             target=serve_dns, args=(dns_socket,), daemon=True

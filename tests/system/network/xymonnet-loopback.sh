@@ -50,7 +50,7 @@ for ((attempt = 0; attempt < 1000; attempt++)); do
 done
 [[ -s $ready ]] || fail "loopback fixture did not become ready"
 read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
-	https_port mtls_port dns_ready ntp_ready empty_port < "$ready"
+	https_port mtls_port dns_ready ntp_ready empty_port tls12_port < "$ready"
 
 {
 	printf '%s' '127.0.0.1 system.test #'
@@ -70,6 +70,8 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 	printf ' httpstatus=statusokonly;http://127.0.0.1:%s/good;2..;' "$http_port"
 	printf ' httpstatus=statusbadonly;http://127.0.0.1:%s/missing;;4..' "$http_port"
 	printf ' httpstatus=statusunreach;http://127.0.0.1:%s/nope;2..;999' "$empty_port"
+	printf ' cont=http10ok;http10://127.0.0.1:%s/httpversion;HTTP/1.0' "$http_port"
+	printf ' cont=http11ok;http11://127.0.0.1:%s/httpversion;HTTP/1.1' "$http_port"
 	printf ' cont=contentok;http://127.0.0.1:%s/good;status=ok' "$http_port"
 	printf ' cont=contentbad;http://127.0.0.1:%s/good;status=missing' "$http_port"
 	printf ' nocont=absentok;http://127.0.0.1:%s/good;failure' "$http_port"
@@ -104,6 +106,30 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 	fi
 	if [[ $https_port != 0 ]]; then
 		printf ' http=httpsok;https://127.0.0.1:%s/good' "$https_port"
+		# Scheme-suffix "dialects" from hosts.cfg(5): SSLv2/SSLv3 ("2"/"3") are
+		# compiled out on modern OpenSSL, so forcing them is a silent no-op --
+		# xymonnet falls through to a normal default-negotiated TLS connection.
+		printf ' http=sslv2noop;https2://127.0.0.1:%s/good' "$https_port"
+		printf ' http=sslv3noop;https3://127.0.0.1:%s/good' "$https_port"
+		# TLSv1.0/1.1 ("t"/"a"/"b") are disabled by OpenSSL 3.x by default, so
+		# forcing them can never complete a handshake in this environment.
+		printf ' http=tls10fail;httpst://127.0.0.1:%s/good' "$https_port"
+		printf ' http=tls10altfail;httpsa://127.0.0.1:%s/good' "$https_port"
+		printf ' http=tls11fail;httpsb://127.0.0.1:%s/good' "$https_port"
+		printf ' http=tls13ok;httpsd://127.0.0.1:%s/good' "$https_port"
+		# Cipher-strength suffixes: "HIGH" matches broadly (succeeds); "MEDIUM"
+		# matches nothing on modern OpenSSL, so SSL_CTX_set_cipher_list fails
+		# and the previous (default) cipher list is left in place -- either way
+		# the connection should still succeed, proving the code path itself
+		# doesn't break a request.
+		printf ' http=cipherhighok;httpsh://127.0.0.1:%s/good' "$https_port"
+		printf ' http=ciphermediumok;httpsm://127.0.0.1:%s/good' "$https_port"
+	fi
+	if [[ $tls12_port != 0 ]]; then
+		# A TLSv1.2-only listener proves version forcing is a real constraint,
+		# not just "some default TLS version happened to work".
+		printf ' http=tls12ok;httpsc://127.0.0.1:%s/good' "$tls12_port"
+		printf ' http=tls13mismatch;httpsd://127.0.0.1:%s/good' "$tls12_port"
 	fi
 	if [[ $mtls_port != 0 ]]; then
 		printf ' http=certauthok;https://CERT:client.pem@127.0.0.1:%s/good' "$mtls_port"
@@ -172,6 +198,8 @@ for expected in \
 	'system,test.statusokonly green' \
 	'system,test.statusbadonly red' \
 	'system,test.statusunreach red' \
+	'system,test.http10ok green' \
+	'system,test.http11ok green' \
 	'system,test.contentok green' \
 	'system,test.contentbad red' \
 	'system,test.absentok green' \
@@ -231,6 +259,35 @@ if [[ $https_port != 0 ]]; then
 		cat "$work/xymonnet.err" >&2
 		fail "missing successful HTTPS result"
 	}
+	for scheme_expected in \
+		'system,test.sslv2noop green' \
+		'system,test.sslv3noop green' \
+		'system,test.tls10fail red' \
+		'system,test.tls10altfail red' \
+		'system,test.tls11fail red' \
+		'system,test.tls13ok green' \
+		'system,test.cipherhighok green' \
+		'system,test.ciphermediumok green'
+	do
+		grep -Fq "$scheme_expected" "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			cat "$work/xymonnet.err" >&2
+			fail "missing expected SSL/HTTP scheme-suffix result: $scheme_expected"
+		}
+	done
+fi
+
+if [[ $tls12_port != 0 ]]; then
+	for tls12_expected in \
+		'system,test.tls12ok green' \
+		'system,test.tls13mismatch red'
+	do
+		grep -Fq "$tls12_expected" "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			cat "$work/xymonnet.err" >&2
+			fail "missing expected TLS-version-pinned result: $tls12_expected"
+		}
+	done
 fi
 
 if [[ $mtls_port != 0 ]]; then
