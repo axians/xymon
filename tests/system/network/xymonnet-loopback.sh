@@ -90,6 +90,17 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 	if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		printf ' ldap://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 		printf ' ldaps://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
+		# Same dialect suffixes as https, appended to the ldaps:// scheme.
+		# Both expected green here: on OpenLDAP linked against GnuTLS (this
+		# container's default -- see hosts.cfg(5)), ldap_set_option() for
+		# LDAP_OPT_X_TLS_PROTOCOL_MIN/MAX reports success without the
+		# restriction actually being enforced at handshake time, so a
+		# forced TLSv1.0 ("ldapst") still completes. This is a known
+		# OpenLDAP+GnuTLS limitation, not a xymonnet bug -- this pair only
+		# proves the suffix-stripping and option-setting code path itself
+		# doesn't break the connection.
+		printf ' ldapsd://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
+		printf ' ldapst://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 	fi
 	if [[ $dns_ready = 1 ]]; then
 		printf ' dns=A:fixture.xymon.test dig=A:fixture.xymon.test'
@@ -103,6 +114,12 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 	printf ' telnet:%s' "$telnet_port"
 	if [[ $tls_port != 0 ]]; then
 		printf ' ftps:%s ftps:%s' "$tls_port" "$ssh_port"
+		# Same hosts.cfg(5) dialect suffixes as http/https, now also accepted
+		# on the plain colon-port SSL-tunneled tags (ftps/telnets/smtps/
+		# pop3s/imaps/nntps). TLSv1.3 succeeds against this default-range
+		# listener; TLSv1.0 can never complete a handshake on this OpenSSL.
+		printf ' ftpsd:%s' "$tls_port"
+		printf ' ftpst:%s' "$tls_port"
 	fi
 	if [[ $https_port != 0 ]]; then
 		printf ' http=httpsok;https://127.0.0.1:%s/good' "$https_port"
@@ -251,6 +268,16 @@ if [[ $tls_port != 0 ]]; then
 			fail "missing expected TLS result: $tls_expected"
 		}
 	done
+
+	# ftps (plain) + ftpsd (TLSv1.3, green) + ftpst (TLSv1.0, red): two of each.
+	[[ $(grep -Fc 'system,test.ftps green' "$work/xymonnet.out") = 2 ]] || {
+		cat "$work/xymonnet.out" >&2
+		fail "expected two successful ftps reports (plain + TLSv1.3 dialect)"
+	}
+	[[ $(grep -Fc 'system,test.ftps red' "$work/xymonnet.out") = 2 ]] || {
+		cat "$work/xymonnet.out" >&2
+		fail "expected two failed ftps reports (plain + TLSv1.0 dialect)"
+	}
 fi
 
 if [[ $https_port != 0 ]]; then
@@ -340,7 +367,9 @@ if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		'ldapauth,test.ldap green' \
 		'ldapauthfail,test.ldap red' \
 		"ldap://127.0.0.1:$XYMONNET_LDAP_PORT/" \
-		"ldaps://127.0.0.1:$XYMONNET_LDAP_PORT/"
+		"ldaps://127.0.0.1:$XYMONNET_LDAP_PORT/" \
+		"ldapsd://127.0.0.1:$XYMONNET_LDAP_PORT/" \
+		"ldapst://127.0.0.1:$XYMONNET_LDAP_PORT/"
 	do
 		grep -Fq "$ldap_expected" "$work/xymonnet.out" || {
 			cat "$work/xymonnet.out" >&2
