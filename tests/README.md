@@ -40,9 +40,13 @@ The full `xymonnet` system scenario runs after `xymonnet` has been built:
 
   ./tests/system/network/xymonnet-loopback.sh
 
-For a reproducible Ubuntu build and native system run, use the Podman launcher.
-It copies the read-only source mount into the container before configuring and
-building, so it does not modify the checkout. The container also starts
+For a reproducible build and native system run, use the Podman launcher. It
+defaults to Ubuntu, and also supports Rocky Linux 10 (RHEL-family); the
+container-side script detects the OS family from `/etc/os-release` and adjusts
+package manager, package names, and OpenLDAP schema/module paths accordingly
+-- no extra flags needed beyond the image itself. It copies the read-only
+source mount into the container before configuring and building, so it does
+not modify the checkout. The container also starts
 OpenLDAP, DNS, NTP, HTTP(S), TCP, TLS, and telnet fixtures. The loopback matrix
 covers 79 probes, including authenticated LDAP searches, LDAPv3 STARTTLS, HTTP
 passwords from hosts.cfg URLs and netrc, TLS client certificate authentication,
@@ -61,12 +65,27 @@ explicitly for the same containerized scenario:
 
   XYMONNET_VALGRIND=1 ./build/xymonnet-system-podman.sh
 
-The launcher keeps APT packages and index lists in the named Podman volumes
-`xymonnet-system-apt-cache` and `xymonnet-system-apt-lists`. Override the names
-with `XYMON_SYSTEM_APT_CACHE_VOLUME` and `XYMON_SYSTEM_APT_LISTS_VOLUME`, or
-clear the defaults with:
+Run the same scenario against Rocky Linux 10 with `XYMON_SYSTEM_IMAGE`
+(use the fully-qualified name if the "rockylinux" short name isn't
+configured in your Podman registries):
 
-  podman volume rm xymonnet-system-apt-cache xymonnet-system-apt-lists
+  XYMON_SYSTEM_IMAGE=quay.io/rockylinux/rockylinux:10 ./build/xymonnet-system-podman.sh
+
+One behavioral difference is expected, not a failure: `libldap`'s TLS backend
+differs between distros (GnuTLS on Debian/Ubuntu, OpenSSL on RHEL-family --
+check yours with `ldd $(which ldapsearch) | grep -iE 'ssl|gnutls'`), and only
+the OpenSSL-linked build actually enforces the SSL/TLS version forced by a
+`ldaps://` scheme-suffix dialect (see hosts.cfg(5)). The loopback test reads
+its own container's OS family to assert the color that's actually correct for
+each, so this shows up as intentional, documented test logic, not as a skip.
+
+The launcher keeps APT packages and index lists in the named Podman volumes
+`xymonnet-system-apt-cache` and `xymonnet-system-apt-lists`, and dnf's package
+cache in `xymonnet-system-dnf-cache`. Override the names with
+`XYMON_SYSTEM_APT_CACHE_VOLUME`, `XYMON_SYSTEM_APT_LISTS_VOLUME`, and
+`XYMON_SYSTEM_DNF_CACHE_VOLUME`, or clear the defaults with:
+
+  podman volume rm xymonnet-system-apt-cache xymonnet-system-apt-lists xymonnet-system-dnf-cache
 
 `bash` is a hard prerequisite of the suite (every test uses it; see
 Conventions). The runner itself is POSIX sh, and on a host without bash it

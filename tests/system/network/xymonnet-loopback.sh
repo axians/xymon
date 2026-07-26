@@ -361,7 +361,6 @@ fi
 
 if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 	for ldap_expected in \
-		'system,test.ldap green' \
 		'ldapfail,test.ldap red' \
 		'ldaptlsfail,test.ldap red' \
 		'ldapauth,test.ldap green' \
@@ -377,6 +376,25 @@ if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 			fail "missing expected LDAP result: $ldap_expected"
 		}
 	done
+
+	# The "system.test" host's ldap column aggregates every ldap://ldaps://
+	# test on it into one worst-color-wins status. ldapst (forced TLSv1.0)
+	# is part of that aggregate, and its color depends on which TLS library
+	# libldap is linked against (see hosts.cfg(5)): OpenSSL-linked builds
+	# (RHEL-family) genuinely enforce the restriction, so ldapst fails and
+	# drags the aggregate to red; GnuTLS-linked builds (Debian/Ubuntu) don't
+	# enforce it, so ldapst succeeds and the aggregate stays green.
+	if [[ ${XYMONNET_OS_FAMILY:-debian} = rhel ]]; then
+		grep -Fq 'system,test.ldap red' "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			fail "expected the ldap aggregate to be red (ldapst enforced on OpenSSL-linked libldap)"
+		}
+	else
+		grep -Fq 'system,test.ldap green' "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			fail "expected the ldap aggregate to be green (ldapst not enforced on GnuTLS-linked libldap)"
+		}
+	fi
 fi
 
 [[ $(grep -Fc 'system,test.ssh green' "$work/xymonnet.out") = 2 ]] ||

@@ -25,13 +25,25 @@ openssl x509 -req -days 365 -in "$ldap_root/client.csr" \
 cat "$ldap_root/client.crt" "$ldap_root/client.key" > "$ldap_root/client.pem"
 chmod 600 "$ldap_root/client.key" "$ldap_root/client.pem"
 
+# Schema location and mdb-backend loading differ by packaging: Debian ships
+# schemas under /etc/ldap and builds mdb as a loadable module; RHEL-family
+# (openldap-servers) ships them under /etc/openldap and links mdb statically
+# into slapd, so there is no module to load (and no /usr/lib64/openldap/
+# back_mdb.so to load it from).
+if [[ ${XYMONNET_OS_FAMILY:-debian} = rhel ]]; then
+	schema_dir=/etc/openldap/schema
+	module_config=""
+else
+	schema_dir=/etc/ldap/schema
+	module_config=$'modulepath /usr/lib/ldap\nmoduleload back_mdb'
+fi
+
 cat > "$ldap_root/slapd.conf" <<EOF
-include /etc/ldap/schema/core.schema
-include /etc/ldap/schema/cosine.schema
+include $schema_dir/core.schema
+include $schema_dir/cosine.schema
 pidfile $ldap_root/slapd.pid
 argsfile $ldap_root/slapd.args
-modulepath /usr/lib/ldap
-moduleload back_mdb
+$module_config
 TLSCACertificateFile $ldap_root/server.crt
 TLSCertificateFile $ldap_root/server.crt
 TLSCertificateKeyFile $ldap_root/server.key
