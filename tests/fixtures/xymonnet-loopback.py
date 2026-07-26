@@ -35,6 +35,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/missing":
             self.send_fixture(404, b"not found\n")
+        elif self.path == "/error":
+            self.send_fixture(500, b"internal error\n")
         elif self.path == "/json":
             self.send_fixture(
                 body=b'{"status":"ok"}\n', content_type="application/json"
@@ -78,6 +80,12 @@ def serve_banner(listener, banner):
         with connection:
             connection.sendall(banner)
             connection.recv(1024)
+
+
+def serve_empty(listener):
+    while True:
+        connection, _ = listener.accept()
+        connection.close()
 
 
 def serve_telnet(listener):
@@ -194,6 +202,7 @@ def main():
     bad_banner_listener = make_listener()
     ftp_listener = make_listener()
     telnet_listener = make_listener()
+    empty_listener = make_listener()
 
     tls_listener = None
     tls_context = None
@@ -238,7 +247,8 @@ def main():
             f"{bad_banner_listener.getsockname()[1]} "
             f"{ftp_listener.getsockname()[1]} "
             f"{telnet_listener.getsockname()[1]} {tls_port} {https_port} "
-            f"{mtls_port} {dns_ready or '0'} {ntp_ready or '0'}\n"
+            f"{mtls_port} {dns_ready or '0'} {ntp_ready or '0'} "
+            f"{empty_listener.getsockname()[1]}\n"
         )
 
     threading.Thread(
@@ -258,6 +268,9 @@ def main():
     ).start()
     threading.Thread(
         target=serve_telnet, args=(telnet_listener,), daemon=True
+    ).start()
+    threading.Thread(
+        target=serve_empty, args=(empty_listener,), daemon=True
     ).start()
     if tls_listener and tls_context:
         threading.Thread(

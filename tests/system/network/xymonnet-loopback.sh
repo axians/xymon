@@ -40,16 +40,17 @@ fi
 fixture_pid=$!
 register_cleanup "kill $fixture_pid 2>/dev/null || true"
 
-for ((attempt = 0; attempt < 10000; attempt++)); do
+for ((attempt = 0; attempt < 1000; attempt++)); do
 	[[ -s $ready ]] && break
 	kill -0 "$fixture_pid" 2>/dev/null || {
 		cat "$work/runtime/logs/fixture.log" >&2
 		fail "loopback fixture exited before becoming ready"
 	}
+	sleep 0.01
 done
 [[ -s $ready ]] || fail "loopback fixture did not become ready"
 read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
-	https_port mtls_port dns_ready ntp_ready < "$ready"
+	https_port mtls_port dns_ready ntp_ready empty_port < "$ready"
 
 {
 	printf '%s' '127.0.0.1 system.test #'
@@ -64,6 +65,11 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 	printf ' httphead=headbad;http://127.0.0.1:%s/missing' "$http_port"
 	printf ' httpstatus=statusok;http://127.0.0.1:%s/good;2..;4..' "$http_port"
 	printf ' httpstatus=statusbad;http://127.0.0.1:%s/missing;2..;4..' "$http_port"
+	printf ' httpstatus=statusaltok;http://127.0.0.1:%s/redirect;2..|302;4..|5..' "$http_port"
+	printf ' httpstatus=statuserr;http://127.0.0.1:%s/error;2..;4..|5..' "$http_port"
+	printf ' httpstatus=statusokonly;http://127.0.0.1:%s/good;2..;' "$http_port"
+	printf ' httpstatus=statusbadonly;http://127.0.0.1:%s/missing;;4..' "$http_port"
+	printf ' httpstatus=statusunreach;http://127.0.0.1:%s/nope;2..;999' "$empty_port"
 	printf ' cont=contentok;http://127.0.0.1:%s/good;status=ok' "$http_port"
 	printf ' cont=contentbad;http://127.0.0.1:%s/good;status=missing' "$http_port"
 	printf ' nocont=absentok;http://127.0.0.1:%s/good;failure' "$http_port"
@@ -161,6 +167,11 @@ for expected in \
 	'system,test.headbad red' \
 	'system,test.statusok green' \
 	'system,test.statusbad red' \
+	'system,test.statusaltok green' \
+	'system,test.statuserr red' \
+	'system,test.statusokonly green' \
+	'system,test.statusbadonly red' \
+	'system,test.statusunreach red' \
 	'system,test.contentok green' \
 	'system,test.contentbad red' \
 	'system,test.absentok green' \
