@@ -91,14 +91,13 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 		printf ' ldap://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 		printf ' ldaps://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 		# Same dialect suffixes as https, appended to the ldaps:// scheme.
-		# Both expected green here: on OpenLDAP linked against GnuTLS (this
-		# container's default -- see hosts.cfg(5)), ldap_set_option() for
-		# LDAP_OPT_X_TLS_PROTOCOL_MIN/MAX reports success without the
-		# restriction actually being enforced at handshake time, so a
-		# forced TLSv1.0 ("ldapst") still completes. This is a known
-		# OpenLDAP+GnuTLS limitation, not a xymonnet bug -- this pair only
-		# proves the suffix-stripping and option-setting code path itself
-		# doesn't break the connection.
+		# xymonnet detects which TLS library libldap is linked against at
+		# runtime (LDAP_OPT_X_TLS_PACKAGE) and enforces the requested
+		# version either way -- PROTOCOL_MIN/MAX on OpenSSL-linked builds,
+		# an equivalent GnuTLS priority string on GnuTLS-linked builds
+		# (this container's default). So ldapsd (TLSv1.3) succeeds and
+		# ldapst (TLSv1.0, unavailable on this OpenSSL/GnuTLS build either
+		# way) fails the same on every platform -- see hosts.cfg(5).
 		printf ' ldapsd://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 		printf ' ldapst://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 	fi
@@ -378,23 +377,15 @@ if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 	done
 
 	# The "system.test" host's ldap column aggregates every ldap://ldaps://
-	# test on it into one worst-color-wins status. ldapst (forced TLSv1.0)
-	# is part of that aggregate, and its color depends on which TLS library
-	# libldap is linked against (see hosts.cfg(5)): OpenSSL-linked builds
-	# (RHEL-family) genuinely enforce the restriction, so ldapst fails and
-	# drags the aggregate to red; GnuTLS-linked builds (Debian/Ubuntu) don't
-	# enforce it, so ldapst succeeds and the aggregate stays green.
-	if [[ ${XYMONNET_OS_FAMILY:-debian} = rhel ]]; then
-		grep -Fq 'system,test.ldap red' "$work/xymonnet.out" || {
-			cat "$work/xymonnet.out" >&2
-			fail "expected the ldap aggregate to be red (ldapst enforced on OpenSSL-linked libldap)"
-		}
-	else
-		grep -Fq 'system,test.ldap green' "$work/xymonnet.out" || {
-			cat "$work/xymonnet.out" >&2
-			fail "expected the ldap aggregate to be green (ldapst not enforced on GnuTLS-linked libldap)"
-		}
-	fi
+	# test on it into one worst-color-wins status. ldapst (forced TLSv1.0,
+	# unavailable on both OpenSSL and GnuTLS on any platform this suite
+	# runs on) fails on every platform now that xymonnet enforces the
+	# requested version regardless of which TLS library libldap links
+	# against (see hosts.cfg(5)), so the aggregate is red everywhere.
+	grep -Fq 'system,test.ldap red' "$work/xymonnet.out" || {
+		cat "$work/xymonnet.out" >&2
+		fail "expected the ldap aggregate to be red (ldapst forces an unavailable TLS version)"
+	}
 fi
 
 [[ $(grep -Fc 'system,test.ssh green' "$work/xymonnet.out") = 2 ]] ||
