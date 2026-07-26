@@ -44,13 +44,14 @@ For a reproducible Ubuntu build and native system run, use the Podman launcher.
 It copies the read-only source mount into the container before configuring and
 building, so it does not modify the checkout. The container also starts
 OpenLDAP, DNS, NTP, HTTP(S), TCP, TLS, and telnet fixtures. The loopback matrix
-covers 75 probes, including authenticated LDAP searches, LDAPv3 STARTTLS, HTTP
+covers 79 probes, including authenticated LDAP searches, LDAPv3 STARTTLS, HTTP
 passwords from hosts.cfg URLs and netrc, TLS client certificate authentication,
 HTTP redirects, strict TCP response checking, telnet negotiation, httpstatus
 regex matching across status classes (including PCRE alternation and the
-"connected but no response" 999 fallback), the hosts.cfg(5) http(s) scheme-suffix
-dialects (forced SSLv2/v3, TLSv1.0-1.3, cipher-strength, and HTTP/1.0 vs 1.1),
-and positive, dial-up, and reverse ping checks. Green behaviors are paired with
+"connected but no response" 999 fallback), the hosts.cfg(5) SSL/TLS scheme-suffix
+dialects on http(s), ftps/telnets/smtps/pop3s/imaps/nntps, and ldap(s) (forced
+SSLv2/v3, TLSv1.0-1.3, cipher-strength, and HTTP/1.0 vs 1.1), and positive,
+dial-up, and reverse ping checks. Green behaviors are paired with
 deterministic failure paths:
 
   ./build/xymonnet-system-podman.sh
