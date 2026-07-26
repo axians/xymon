@@ -1411,16 +1411,15 @@ under "Forcing an HTTP or SSL version" above can be appended to the
 "ldaps" scheme, e.g. "ldapsc://hostport/dn" to require TLSv1.2, or
 "ldapshd://hostport/dn" to require TLSv1.3 with high-strength ciphers.
 
-Note: xymonnet asks the OpenLDAP library to enforce the requested SSL/TLS
-version via the standard LDAP_OPT_X_TLS_PROTOCOL_MIN/MAX options. On
-OpenLDAP builds linked against OpenSSL (common on RHEL-family systems)
-this is enforced as expected. On OpenLDAP builds linked against GnuTLS
-(the default on Debian and Ubuntu), OpenLDAP may accept the option
-without actually enforcing it during the handshake -- a known limitation
-of OpenLDAP's GnuTLS backend, not something xymonnet can detect or work
-around. Check what TLS library your libldap is linked against (e.g.
-"ldd $(which ldapsearch) | grep -i 'ssl\\|gnutls'") before relying on
-this for compliance testing against ldaps:// targets.
+Note: which TLS library your libldap is linked against (OpenSSL, common on
+RHEL-family systems, or GnuTLS, the default on Debian and Ubuntu) is
+detected automatically per-connection, and xymonnet enforces the requested
+SSL/TLS version and cipher strength either way -- via the standard
+LDAP_OPT_X_TLS_PROTOCOL_MIN/MAX options on OpenSSL-linked builds, or via an
+equivalent GnuTLS priority string on GnuTLS-linked builds (OpenLDAP's
+GnuTLS backend accepts PROTOCOL_MIN/MAX without an error, but does not
+actually enforce them during the handshake). You do not need to know or
+check which library your system uses.
 
 .IP ldaplogin=username:password
 Define a username and password to use when binding to the LDAP

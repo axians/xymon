@@ -194,6 +194,61 @@ static int ldap_tls_protocol_version(int sslversion)
 	  default:               return 0;
 	}
 }
+
+/*
+ * GnuTLS priority-string equivalent of ldap_tls_protocol_version() above.
+ * NULL means "no restriction": used for SSLVERSION_DEFAULT, and for V2
+ * (GnuTLS has no SSLv2 priority keyword on modern builds) -- matching the
+ * silent no-op that forcing SSLv2 already is on the OpenSSL side of this
+ * file when HAVE_SSLV2_SUPPORT isn't defined.
+ */
+static const char *gnutls_version_keyword(int sslversion)
+{
+	switch (sslversion) {
+	  case SSLVERSION_V3:    return "SSL3.0";
+	  case SSLVERSION_TLS10: return "TLS1.0";
+	  case SSLVERSION_TLS11: return "TLS1.1";
+	  case SSLVERSION_TLS12: return "TLS1.2";
+	  case SSLVERSION_TLS13: return "TLS1.3";
+	  default:               return NULL;
+	}
+}
+
+/*
+ * Build the one GnuTLS priority string that expresses both the requested
+ * cipher-strength and SSL/TLS version, for LDAP_OPT_X_TLS_CIPHER_SUITE.
+ *
+ * OpenLDAP's GnuTLS backend accepts LDAP_OPT_X_TLS_PROTOCOL_MIN/MAX (the
+ * option ldap_set_option() reports success for) without actually enforcing
+ * either bound during the handshake -- confirmed empirically: a client and
+ * server both pinned to TLSv1.0 via these options still completed a
+ * default-negotiated handshake. What GnuTLS does enforce is a priority
+ * string set via LDAP_OPT_X_TLS_CIPHER_SUITE (confirmed the opposite way:
+ * "NORMAL:-VERS-TLS-ALL" with nothing re-enabled reliably fails the
+ * handshake with "No or insufficient priorities were set"). That is the
+ * same option the OpenSSL backend uses for cipher-strength alone, but in
+ * OpenSSL cipher-list syntax ("HIGH"/"MEDIUM") -- which is not valid
+ * GnuTLS priority syntax and breaks the handshake outright if sent to a
+ * GnuTLS-linked libldap, so the two concerns must be combined into one
+ * string here rather than set independently.
+ *
+ * SECURE256/SECURE128 are GnuTLS's own priority-string security-level
+ * shortcuts, used as the nearest equivalent to the OpenSSL "HIGH"/"MEDIUM"
+ * keywords; NORMAL is GnuTLS's standard baseline when no cipher-strength
+ * suffix was requested.
+ */
+static void build_gnutls_priority(ssloptions_t *sslopt, char *buf, size_t buflen)
+{
+	const char *base = "NORMAL";
+	const char *ver;
+
+	if (sslopt->cipherlist == ciphershigh) base = "SECURE256";
+	else if (sslopt->cipherlist == ciphersmedium) base = "SECURE128";
+
+	ver = gnutls_version_keyword(sslopt->sslversion);
+	if (ver) snprintf(buf, buflen, "%s:-VERS-TLS-ALL:+VERS-%s", base, ver);
+	else     snprintf(buf, buflen, "%s", base);
+}
 #endif
 
 void run_ldap_tests(service_t *ldaptest, int sslcertcheck, int querytimeout)
@@ -295,29 +350,41 @@ void run_ldap_tests(service_t *ldaptest, int sslcertcheck, int querytimeout)
 #ifdef LDAP_OPT_X_TLS_PROTOCOL_MIN
 			ssloptions_t *sslopt = (ssloptions_t *) req->sslopt;
 
-			if (sslopt) {
+			if (sslopt && (sslopt->sslversion != SSLVERSION_DEFAULT || sslopt->cipherlist)) {
 				int newctx = 0;
+				char *tlspackage = NULL;
 
-				if (sslopt->sslversion != SSLVERSION_DEFAULT) {
-					int proto = ldap_tls_protocol_version(sslopt->sslversion);
+				/*
+				 * Which TLS library libldap is actually linked against is
+				 * a runtime property (queryable per-handle), not something
+				 * fixed at compile time -- so query it and branch, rather
+				 * than assuming a backend from the platform.
+				 */
+				ldap_get_option(ld, LDAP_OPT_X_TLS_PACKAGE, &tlspackage);
 
-					ldap_set_option(ld, LDAP_OPT_X_TLS_PROTOCOL_MIN, &proto);
+				if (tlspackage && strcasecmp(tlspackage, "GnuTLS") == 0) {
+					char priority[128];
+
+					build_gnutls_priority(sslopt, priority, sizeof(priority));
+					ldap_set_option(ld, LDAP_OPT_X_TLS_CIPHER_SUITE, priority);
+				}
+				else {
+					if (sslopt->sslversion != SSLVERSION_DEFAULT) {
+						int proto = ldap_tls_protocol_version(sslopt->sslversion);
+
+						ldap_set_option(ld, LDAP_OPT_X_TLS_PROTOCOL_MIN, &proto);
 #ifdef LDAP_OPT_X_TLS_PROTOCOL_MAX
-					ldap_set_option(ld, LDAP_OPT_X_TLS_PROTOCOL_MAX, &proto);
+						ldap_set_option(ld, LDAP_OPT_X_TLS_PROTOCOL_MAX, &proto);
 #endif
+					}
+					if (sslopt->cipherlist) {
+						ldap_set_option(ld, LDAP_OPT_X_TLS_CIPHER_SUITE, sslopt->cipherlist);
+					}
 				}
-				if (sslopt->cipherlist) {
-					ldap_set_option(ld, LDAP_OPT_X_TLS_CIPHER_SUITE, sslopt->cipherlist);
-				}
+				if (tlspackage) ldap_memfree(tlspackage);
+
 				/* Per-handle TLS options above only take effect once a
-				 * new TLS library context is built for this handle. Note:
-				 * on OpenLDAP builds linked against GnuTLS (the default on
-				 * Debian/Ubuntu), PROTOCOL_MIN/MAX may be accepted here
-				 * (ldap_set_option() returns success) without actually
-				 * being enforced during the handshake -- a known gap in
-				 * OpenLDAP's GnuTLS backend, not something xymonnet can
-				 * detect or work around. Builds linked against OpenSSL
-				 * (e.g. RHEL-family) do not have this limitation. */
+				 * new TLS library context is built for this handle. */
 				ldap_set_option(ld, LDAP_OPT_X_TLS_NEWCTX, &newctx);
 			}
 #endif
