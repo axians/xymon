@@ -10,14 +10,21 @@
 # xymongen/loaddata.c, load_state()) -- an intentional debugging hook that
 # also makes this fully hermetic.
 #
-# Two hosts, two tags:
-#   www.example.com  # conn http   (conn green, http red)
-#   db.example.com   # conn        (conn green, no http tag at all)
+# Three hosts, two tags, one ungrouped host in front of a named "group":
+#   solo.example.com  # conn        (ungrouped -- appears before the "group" line)
+#   www.example.com   # conn http   (conn green, http red)
+#   db.example.com    # conn        (conn green, no http tag at all)
 #
-# Asserts two distinct pieces of xymongen behaviour:
+# Asserts three distinct pieces of xymongen behaviour:
 #   - the main page (xymon.html) renders exactly the tags each host has
 #     (hosts.cfg tag -> column mapping), with the color from the board
 #     dump, not from hosts.cfg;
+#   - a "group" directive renders a named group block, without losing the
+#     ungrouped host that precedes it on the same page (loadlayout.c only
+#     resets the current group on a new page/subpage/subparent line, never
+#     back to "no group" mid-page -- so hosts before the first "group" line
+#     are the only way to get an ungrouped block on a page that also has
+#     named groups);
 #   - the nongreen page (nongreen.html) drops fully-green hosts and
 #     fully-green columns entirely, not just recolors them -- db.example.com
 #     (all green) must not appear on it at all, and neither should a
@@ -42,12 +49,15 @@ for f in stdnormal_header stdnormal_footer stdnongreen_header stdnongreen_footer
 done
 
 cat > "$work/hosts.cfg" <<'EOF'
+127.0.0.1 solo.example.com # conn
+group Example Hosts
 127.0.0.1 www.example.com # conn http
 127.0.0.1 db.example.com  # conn
 EOF
 
 # hostname|testname|color|testflags|lastchange|logtime|validtime|acktime|disabletime|sender|cookie|msg
 cat > "$work/board.dump" <<'EOF'
+solo.example.com|conn|green|||||||127.0.0.1|-1|OK
 www.example.com|conn|green|||||||127.0.0.1|-1|OK
 www.example.com|http|red|||||||127.0.0.1|-1|Connection refused
 db.example.com|conn|green|||||||127.0.0.1|-1|OK
@@ -93,13 +103,17 @@ export BOARDDUMP="$work/board.dump"
 assert_file_exists "$work/web/xymon.html" "main page was not generated"
 main=$(cat "$work/web/xymon.html")
 
+assert_contains 'solo.example.com' "$main" "main page must list the ungrouped solo.example.com"
 assert_contains 'www.example.com' "$main" "main page must list www.example.com"
 assert_contains 'db.example.com' "$main" "main page must list db.example.com"
+assert_contains '<A NAME="group-Example_Hosts">' "$main" \
+	"the 'group' directive must render a named group anchor"
 assert_contains 'ALT="http:red:"' "$main" "www.example.com's failed http test must render red"
-# Both hosts have "conn", both are green in the board dump -- exactly two
-# green conn dots, and no red/other color for it.
-[ "$(grep -Fc 'ALT="conn:green:"' <<<"$main")" = 2 ] ||
-	fail "expected exactly two green conn indicators, one per host"
+# All three hosts have "conn", all green in the board dump -- exactly
+# three green conn dots (one ungrouped, two inside the named group), and
+# no red/other color for it.
+[ "$(grep -Fc 'ALT="conn:green:"' <<<"$main")" = 3 ] ||
+	fail "expected exactly three green conn indicators, one per host"
 # db.example.com has no "http" tag in hosts.cfg at all: xymongen must not
 # invent a status for it just because another host on the same page has
 # that column.
@@ -114,6 +128,8 @@ assert_contains 'www.example.com' "$nongreen" \
 assert_contains 'ALT="http:red:"' "$nongreen" "nongreen page must show the red http test"
 assert_not_contains 'db.example.com' "$nongreen" \
 	"nongreen page must drop db.example.com entirely -- it has no non-green tests"
+assert_not_contains 'solo.example.com' "$nongreen" \
+	"nongreen page must drop the ungrouped solo.example.com too -- it is fully green"
 assert_not_contains '>conn<' "$nongreen" \
 	"nongreen page must drop the conn column header -- conn is green on every host that has it"
 
