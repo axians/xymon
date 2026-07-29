@@ -12,9 +12,9 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 image=${XYMON_SYSTEM_IMAGE:-ubuntu:24.04}
-apt_cache_volume=${XYMON_SYSTEM_APT_CACHE_VOLUME:-xymonnet-system-apt-cache}
-apt_lists_volume=${XYMON_SYSTEM_APT_LISTS_VOLUME:-xymonnet-system-apt-lists}
-dnf_cache_volume=${XYMON_SYSTEM_DNF_CACHE_VOLUME:-xymonnet-system-dnf-cache}
+apt_cache_volume=${XYMON_SYSTEM_APT_CACHE_VOLUME:-xymon-system-apt-cache}
+apt_lists_volume=${XYMON_SYSTEM_APT_LISTS_VOLUME:-xymon-system-apt-lists}
+dnf_cache_volume=${XYMON_SYSTEM_DNF_CACHE_VOLUME:-xymon-system-dnf-cache}
 
 command -v podman >/dev/null 2>&1 || {
 	printf 'podman is required\n' >&2

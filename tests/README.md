@@ -80,12 +80,26 @@ its own container's OS family to assert the color that's actually correct for
 each, so this shows up as intentional, documented test logic, not as a skip.
 
 The launcher keeps APT packages and index lists in the named Podman volumes
-`xymonnet-system-apt-cache` and `xymonnet-system-apt-lists`, and dnf's package
-cache in `xymonnet-system-dnf-cache`. Override the names with
+`xymon-system-apt-cache` and `xymon-system-apt-lists`, and dnf's package
+cache in `xymon-system-dnf-cache`. Override the names with
 `XYMON_SYSTEM_APT_CACHE_VOLUME`, `XYMON_SYSTEM_APT_LISTS_VOLUME`, and
 `XYMON_SYSTEM_DNF_CACHE_VOLUME`, or clear the defaults with:
 
-  podman volume rm xymonnet-system-apt-cache xymonnet-system-apt-lists xymonnet-system-dnf-cache
+  podman volume rm xymon-system-apt-cache xymon-system-apt-lists xymon-system-dnf-cache
+
+There's a second, plainer Podman launcher for the regression catalog itself
+(no network fixtures) -- a clean-room build-and-test of a full Xymon server
+tree, most useful for exercising `tests/server/xymongen-*.sh` and everything
+else `require_bin` gates on distros other than your host's:
+
+  ./build/xymongen-podman.sh
+  XYMON_SYSTEM_IMAGE=quay.io/rockylinux/rockylinux:10 ./build/xymongen-podman.sh
+
+It shares the same cache volumes and `XYMON_SYSTEM_IMAGE`/`XYMON_SYSTEM_*_VOLUME`
+overrides as the launcher above. See tests/lib/xymongen-container.sh for a
+container-environment quirk it works around: the plain `docker.io/library/
+ubuntu:24.04` image links standalone tools as non-PIE objects into a PIE
+default, which the actual CI build (a different Ubuntu image) does not hit.
 
 `bash` is a hard prerequisite of the suite (every test uses it; see
 Conventions). The runner itself is POSIX sh, and on a host without bash it
