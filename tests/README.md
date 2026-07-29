@@ -110,7 +110,7 @@ shipped-file invariants) get their own area.
 | Area              | What lives here                                        |
 | ----------------- | ------------------------------------------------------ |
 | `tests/client/`   | xymon client tools and behaviours                      |
-| `tests/server/`   | xymond-side tools (xymongrep, xymoncgimsg, alert routing) |
+| `tests/server/`   | xymond-side tools (xymongrep, xymoncgimsg, alert routing, xymongen page rendering) |
 | `tests/network/`  | xymonnet probes (xymonping, network checks)            |
 | `tests/web/`      | CGIs, HTML rendering paths                             |
 | `tests/packaging/`| cross-cutting: shipped files, paths, generated configs |
