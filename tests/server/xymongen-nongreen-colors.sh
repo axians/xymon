@@ -28,6 +28,13 @@
 # spellings across this test area ("group" is covered in
 # xymongen-status-render.sh; hosts.cfg(5) documents the two as handled
 # identically).
+#
+# Every host also carries green "info"/"trends" (present on essentially
+# every real node -- see xymongen-status-render.sh for the dedicated
+# assertions on that pair). Here they mainly prove the inclusion rules
+# above hold even in their presence: green-host and clear-host both have
+# green info/trends same as everyone else, yet still correctly stay off
+# this page entirely -- info/trends never independently qualify a host.
 
 set -euo pipefail
 # shellcheck source=tests/lib/assert.sh
@@ -55,16 +62,28 @@ EOF
 
 cat > "$work/board.dump" <<'EOF'
 green-host.example.com|conn|green|||||||127.0.0.1|-1|OK
+green-host.example.com|info|green|||||||127.0.0.1|-1|Host info
+green-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
 yellow-host.example.com|conn|green|||||||127.0.0.1|-1|OK
 yellow-host.example.com|disk|yellow|||||||127.0.0.1|-1|Getting full
+yellow-host.example.com|info|green|||||||127.0.0.1|-1|Host info
+yellow-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
 red-host.example.com|conn|green|||||||127.0.0.1|-1|OK
 red-host.example.com|cpu|red|||||||127.0.0.1|-1|Load high
+red-host.example.com|info|green|||||||127.0.0.1|-1|Host info
+red-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
 purple-host.example.com|conn|purple|||||||127.0.0.1|-1|No data
+purple-host.example.com|info|green|||||||127.0.0.1|-1|Host info
+purple-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
 clear-host.example.com|conn|clear|||||||127.0.0.1|-1|Dialup down
+clear-host.example.com|info|green|||||||127.0.0.1|-1|Host info
+clear-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
 multi.example.com|conn|green|||||||127.0.0.1|-1|OK
 multi.example.com|disk|yellow|||||||127.0.0.1|-1|Getting full
 multi.example.com|cpu|red|||||||127.0.0.1|-1|Load high
 multi.example.com|memory|green|||||||127.0.0.1|-1|OK
+multi.example.com|info|green|||||||127.0.0.1|-1|Host info
+multi.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
 EOF
 
 export XYMONACKDIR="$work/ack"

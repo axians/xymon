@@ -15,10 +15,20 @@
 #   www.example.com   # conn http   (conn green, http red)
 #   db.example.com    # conn        (conn green, no http tag at all)
 #
-# Asserts three distinct pieces of xymongen behaviour:
-#   - the main page (xymon.html) renders exactly the tags each host has
-#     (hosts.cfg tag -> column mapping), with the color from the board
-#     dump, not from hosts.cfg;
+# Every host also carries "info" and "trends" -- in real deployments these
+# two pseudo-tests exist on essentially every node (added by xymongen/the
+# client, not something an operator tags in hosts.cfg), so a fixture
+# without them tests an unrealistic shape of data.
+#
+# Asserts four distinct pieces of xymongen behaviour:
+#   - the main page (xymon.html) renders a column for every test *present in
+#     the board dump for that host* -- this is driven entirely by the board
+#     data, not by hosts.cfg tags: db.example.com has no "http" tag in
+#     hosts.cfg, but the real reason it shows no http indicator is that its
+#     board-dump entry has no "http" line at all. (Verified separately: a
+#     host with a board entry for a test it has no hosts.cfg tag for still
+#     renders that column -- hosts.cfg tags govern host/page/group
+#     placement, not which columns can appear.)
 #   - a "group" directive renders a named group block, without losing the
 #     ungrouped host that precedes it on the same page (loadlayout.c only
 #     resets the current group on a new page/subpage/subparent line, never
@@ -28,7 +38,14 @@
 #   - the nongreen page (nongreen.html) drops fully-green hosts and
 #     fully-green columns entirely, not just recolors them -- db.example.com
 #     (all green) must not appear on it at all, and neither should a
-#     "conn" column header, since conn is green on every host that has it.
+#     "conn" column header, since conn is green on every host that has it;
+#   - "info"/"trends" are always rendered for a host that's already on the
+#     nongreen page for some other reason, regardless of their own color
+#     (pagegen.c: "CLIENT, TRENDS and INFO columns are always included on
+#     non-Xymon pages") -- but, unlike a genuinely nongreen test, they don't
+#     by themselves put a host on the page: db.example.com and
+#     solo.example.com have green info/trends same as www.example.com, yet
+#     only www.example.com (which also has a real red test) appears.
 
 set -euo pipefail
 # shellcheck source=tests/lib/assert.sh
@@ -58,9 +75,15 @@ EOF
 # hostname|testname|color|testflags|lastchange|logtime|validtime|acktime|disabletime|sender|cookie|msg
 cat > "$work/board.dump" <<'EOF'
 solo.example.com|conn|green|||||||127.0.0.1|-1|OK
+solo.example.com|info|green|||||||127.0.0.1|-1|Host info
+solo.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
 www.example.com|conn|green|||||||127.0.0.1|-1|OK
 www.example.com|http|red|||||||127.0.0.1|-1|Connection refused
+www.example.com|info|green|||||||127.0.0.1|-1|Host info
+www.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
 db.example.com|conn|green|||||||127.0.0.1|-1|OK
+db.example.com|info|green|||||||127.0.0.1|-1|Host info
+db.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
 EOF
 
 export XYMONACKDIR="$work/ack"
@@ -114,11 +137,13 @@ assert_contains 'ALT="http:red:"' "$main" "www.example.com's failed http test mu
 # no red/other color for it.
 [ "$(grep -Fc 'ALT="conn:green:"' <<<"$main")" = 3 ] ||
 	fail "expected exactly three green conn indicators, one per host"
-# db.example.com has no "http" tag in hosts.cfg at all: xymongen must not
-# invent a status for it just because another host on the same page has
-# that column.
+# db.example.com's board dump has no "http" line at all (not merely "no
+# http tag in hosts.cfg" -- xymongen renders whatever tests are present in
+# the board dump for a host, regardless of hosts.cfg tags): xymongen must
+# not invent a status for it just because another host on the same page
+# has that column.
 assert_not_contains 'ALT="http:green:"' "$main" \
-	"db.example.com has no http tag; there must be no green http indicator"
+	"db.example.com's board dump has no http entry; there must be no green http indicator"
 
 assert_file_exists "$work/web/nongreen.html" "nongreen page was not generated"
 nongreen=$(cat "$work/web/nongreen.html")
@@ -132,5 +157,12 @@ assert_not_contains 'solo.example.com' "$nongreen" \
 	"nongreen page must drop the ungrouped solo.example.com too -- it is fully green"
 assert_not_contains '>conn<' "$nongreen" \
 	"nongreen page must drop the conn column header -- conn is green on every host that has it"
+# www.example.com is on the page (for its red http), so its green info and
+# trends must still render -- these two are always shown for a host that's
+# already included, regardless of their own color.
+assert_contains 'ALT="info:green:' "$nongreen" \
+	"info must render for www.example.com even though info itself is green"
+assert_contains 'ALT="trends:green:' "$nongreen" \
+	"trends must render for www.example.com even though trends itself is green"
 
 pass "xymongen renders board-dump status colors and nongreen filtering correctly"
