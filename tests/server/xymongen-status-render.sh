@@ -15,10 +15,10 @@
 #   www.example.com   # conn http   (conn green, http red)
 #   db.example.com    # conn        (conn green, no http tag at all)
 #
-# Every host also carries "info" and "trends" -- in real deployments these
-# two pseudo-tests exist on essentially every node (added by xymongen/the
-# client, not something an operator tags in hosts.cfg), so a fixture
-# without them tests an unrealistic shape of data.
+# Every host also carries "info", "trends" and "clientlog" -- in real
+# deployments these three pseudo-tests exist on essentially every node
+# (added by xymongen/the client, not something an operator tags in
+# hosts.cfg), so a fixture without them tests an unrealistic shape of data.
 #
 # Asserts four distinct pieces of xymongen behaviour:
 #   - the main page (xymon.html) renders a column for every test *present in
@@ -39,13 +39,14 @@
 #     fully-green columns entirely, not just recolors them -- db.example.com
 #     (all green) must not appear on it at all, and neither should a
 #     "conn" column header, since conn is green on every host that has it;
-#   - "info"/"trends" are always rendered for a host that's already on the
-#     nongreen page for some other reason, regardless of their own color
-#     (pagegen.c: "CLIENT, TRENDS and INFO columns are always included on
-#     non-Xymon pages") -- but, unlike a genuinely nongreen test, they don't
-#     by themselves put a host on the page: db.example.com and
-#     solo.example.com have green info/trends same as www.example.com, yet
-#     only www.example.com (which also has a real red test) appears.
+#   - "info"/"trends"/"clientlog" are always rendered for a host that's
+#     already on the nongreen page for some other reason, regardless of
+#     their own color (pagegen.c: "CLIENT, TRENDS and INFO columns are
+#     always included on non-Xymon pages") -- but, unlike a genuinely
+#     nongreen test, they don't by themselves put a host on the page:
+#     db.example.com and solo.example.com have the same green
+#     info/trends/clientlog as www.example.com, yet only www.example.com
+#     (which also has a real red test) appears.
 
 set -euo pipefail
 # shellcheck source=tests/lib/assert.sh
@@ -77,13 +78,16 @@ cat > "$work/board.dump" <<'EOF'
 solo.example.com|conn|green|||||||127.0.0.1|-1|OK
 solo.example.com|info|green|||||||127.0.0.1|-1|Host info
 solo.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+solo.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 www.example.com|conn|green|||||||127.0.0.1|-1|OK
 www.example.com|http|red|||||||127.0.0.1|-1|Connection refused
 www.example.com|info|green|||||||127.0.0.1|-1|Host info
 www.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+www.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 db.example.com|conn|green|||||||127.0.0.1|-1|OK
 db.example.com|info|green|||||||127.0.0.1|-1|Host info
 db.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+db.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 EOF
 
 export XYMONACKDIR="$work/ack"
@@ -157,12 +161,14 @@ assert_not_contains 'solo.example.com' "$nongreen" \
 	"nongreen page must drop the ungrouped solo.example.com too -- it is fully green"
 assert_not_contains '>conn<' "$nongreen" \
 	"nongreen page must drop the conn column header -- conn is green on every host that has it"
-# www.example.com is on the page (for its red http), so its green info and
-# trends must still render -- these two are always shown for a host that's
-# already included, regardless of their own color.
+# www.example.com is on the page (for its red http), so its green
+# info/trends/clientlog must still render -- these three are always shown
+# for a host that's already included, regardless of their own color.
 assert_contains 'ALT="info:green:' "$nongreen" \
 	"info must render for www.example.com even though info itself is green"
 assert_contains 'ALT="trends:green:' "$nongreen" \
 	"trends must render for www.example.com even though trends itself is green"
+assert_contains 'ALT="clientlog:green:' "$nongreen" \
+	"clientlog must render for www.example.com even though clientlog itself is green"
 
 pass "xymongen renders board-dump status colors and nongreen filtering correctly"

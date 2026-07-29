@@ -54,12 +54,15 @@ cat > "$work/board.dump" <<'EOF'
 normal.example.com|conn|green|||||||127.0.0.1|-1|OK
 normal.example.com|info|green|||||||127.0.0.1|-1|Host info
 normal.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+normal.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 winxp1.example.com|conn|green|||||||127.0.0.1|-1|OK
 winxp1.example.com|info|green|||||||127.0.0.1|-1|Host info
 winxp1.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+winxp1.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 winfront.example.com|conn|green|||||||127.0.0.1|-1|OK
 winfront.example.com|info|green|||||||127.0.0.1|-1|Host info
 winfront.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+winfront.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 EOF
 
 export XYMONACKDIR="$work/ack"

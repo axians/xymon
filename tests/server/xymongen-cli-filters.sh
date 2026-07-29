@@ -37,10 +37,12 @@ red-host.example.com|conn|green|||||||127.0.0.1|-1|OK
 red-host.example.com|cpu|red|||||||127.0.0.1|-1|Load high
 red-host.example.com|info|green|||||||127.0.0.1|-1|Host info
 red-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+red-host.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 yellow-host.example.com|conn|green|||||||127.0.0.1|-1|OK
 yellow-host.example.com|disk|yellow|||||||127.0.0.1|-1|Getting full
 yellow-host.example.com|info|green|||||||127.0.0.1|-1|Host info
 yellow-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+yellow-host.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 EOF
 
 export XYMONACKDIR="$work/ack"

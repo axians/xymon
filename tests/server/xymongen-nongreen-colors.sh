@@ -64,26 +64,32 @@ cat > "$work/board.dump" <<'EOF'
 green-host.example.com|conn|green|||||||127.0.0.1|-1|OK
 green-host.example.com|info|green|||||||127.0.0.1|-1|Host info
 green-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+green-host.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 yellow-host.example.com|conn|green|||||||127.0.0.1|-1|OK
 yellow-host.example.com|disk|yellow|||||||127.0.0.1|-1|Getting full
 yellow-host.example.com|info|green|||||||127.0.0.1|-1|Host info
 yellow-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+yellow-host.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 red-host.example.com|conn|green|||||||127.0.0.1|-1|OK
 red-host.example.com|cpu|red|||||||127.0.0.1|-1|Load high
 red-host.example.com|info|green|||||||127.0.0.1|-1|Host info
 red-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+red-host.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 purple-host.example.com|conn|purple|||||||127.0.0.1|-1|No data
 purple-host.example.com|info|green|||||||127.0.0.1|-1|Host info
 purple-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+purple-host.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 clear-host.example.com|conn|clear|||||||127.0.0.1|-1|Dialup down
 clear-host.example.com|info|green|||||||127.0.0.1|-1|Host info
 clear-host.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+clear-host.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 multi.example.com|conn|green|||||||127.0.0.1|-1|OK
 multi.example.com|disk|yellow|||||||127.0.0.1|-1|Getting full
 multi.example.com|cpu|red|||||||127.0.0.1|-1|Load high
 multi.example.com|memory|green|||||||127.0.0.1|-1|OK
 multi.example.com|info|green|||||||127.0.0.1|-1|Host info
 multi.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+multi.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 EOF
 
 export XYMONACKDIR="$work/ack"

@@ -59,28 +59,35 @@ cat > "$work/board.dump" <<'EOF'
 a1.example.com|conn|green|||||||127.0.0.1|-1|OK
 a1.example.com|info|green|||||||127.0.0.1|-1|Host info
 a1.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+a1.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 a2.example.com|conn|red|||||||127.0.0.1|-1|Down
 a2.example.com|info|green|||||||127.0.0.1|-1|Host info
 a2.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+a2.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 a3.example.com|conn|green|||||||127.0.0.1|-1|OK
 a3.example.com|info|green|||||||127.0.0.1|-1|Host info
 a3.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+a3.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 solo-b.example.com|conn|green|||||||127.0.0.1|-1|OK
 solo-b.example.com|info|green|||||||127.0.0.1|-1|Host info
 solo-b.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+solo-b.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 b1.example.com|conn|green|||||||127.0.0.1|-1|OK
 b1.example.com|info|green|||||||127.0.0.1|-1|Host info
 b1.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+b1.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 vhost1.example.com|conn|green|||||||127.0.0.1|-1|OK
 vhost1.example.com|cpu|red|||||||127.0.0.1|-1|Load high
 vhost1.example.com|disk|green|||||||127.0.0.1|-1|OK
 vhost1.example.com|info|green|||||||127.0.0.1|-1|Host info
 vhost1.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+vhost1.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 vhost2.example.com|conn|green|||||||127.0.0.1|-1|OK
 vhost2.example.com|cpu|green|||||||127.0.0.1|-1|OK
 vhost2.example.com|disk|yellow|||||||127.0.0.1|-1|Getting full
 vhost2.example.com|info|green|||||||127.0.0.1|-1|Host info
 vhost2.example.com|trends|green|||||||127.0.0.1|-1|Trend graphs
+vhost2.example.com|clientlog|green|||||||127.0.0.1|-1|Client data
 EOF
 
 export XYMONACKDIR="$work/ack"
