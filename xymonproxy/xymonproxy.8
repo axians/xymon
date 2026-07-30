@@ -71,6 +71,37 @@ Size of the listen-queue where incoming connections can
 queue up before being processed. This should be large to
 accommodate bursts of activity from clients. Default: 512.
 
+.IP "\-\-allow\-command=COMMAND[,COMMAND...]"
+Only forward messages whose Xymon command appears in the case-insensitive,
+comma-separated allowlist. The option may be repeated. Command suffixes are
+normalized, so "client/local", "status+10m", and "status/group:ops" match
+"client" and "status". Typical client deployments allow "client,status,data".
+.br
+"combo" and "extcombo" are checked recursively as envelopes; every embedded
+message must be valid and allowed. "schedule" cannot be allowed because it may
+contain a command executed later. Filtering is disabled when this option is
+omitted. Dropped messages are counted in the proxy status report.
+
+.IP "\-\-hosts=FILENAME"
+Only forward messages for hosts defined in the specified
+.I hosts.cfg
+file. This is optional and independent of command filtering. It is intended
+for deployments where each proxy owns a subset of monitored hosts: point each
+proxy at a file containing only its assigned nodes to prevent it from writing
+status, data, or client messages for nodes assigned to another proxy.
+.br
+The file is parsed with Xymon's native hosts parser, including included files.
+Canonical hostnames and "CLIENT:" aliases are accepted, case-insensitively.
+Every embedded message in a "combo" or "extcombo" envelope must name an
+allowed host. The entire envelope is dropped if any hostname is absent or not
+listed. Commands without a defined status, data, or client hostname format are
+dropped while hostname checking is enabled. An unreadable or empty file causes
+the proxy to abort during startup. If this option is omitted, hostname checking
+is disabled. The proxy checks the file and all included files for updates every
+30 seconds; SIGHUP triggers an immediate check. A valid, non-empty configuration
+replaces the active hostname set atomically. If reloading fails, the proxy logs
+the error and continues using the previous configuration.
+
 .IP "\-\-daemon"
 Run in daemon mode, i.e. detach and run as a background process.
 This is the default.
@@ -104,6 +135,12 @@ The status message includes the following information:
 The total number of connections accepted from clients
 since the proxy started. The "(N msgs/second)" is the 
 average number of messages per second over the past 5 minutes.
+
+.IP "Command filtered messages"
+The number of messages dropped by the command allowlist.
+
+.IP "Host filtered messages"
+The number of messages dropped because their hostname is not allowed.
 
 .IP "Outbound messages"
 The total number of messages sent to the Xymon server. 
@@ -181,9 +218,10 @@ send them out over the network.
 .SH ""
 If you think the numbers do not add up, here is how they relate.
 
-The "Incoming messages" should be equal to the sum of the 
-"Incoming Combo/Status/Page/Other messages", or slightly
-more because messages in transit are not included
+The "Incoming messages" should be equal to the sum of the
+"Incoming Combo/Status/Page/Other messages", "Command filtered messages",
+and "Host filtered messages", or slightly more because messages in transit
+are not included
 in the per-type message counts.
 
 The "Outbound messages" should be equal to sum of the
@@ -197,7 +235,9 @@ because messages in transit are not included in the
 
 .SH SIGNALS
 .IP SIGHUP
-Re-opens the logfile, e.g. after it has been rotated.
+Re-opens the logfile, e.g. after it has been rotated, and reloads the file
+configured with "--hosts". A failed hostname reload leaves the previous
+configuration active.
 
 .IP SIGTERM
 Shut down the proxy.
