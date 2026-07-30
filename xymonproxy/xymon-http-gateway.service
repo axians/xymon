@@ -1,0 +1,18 @@
+[Unit]
+Description=Xymon HTTP gateway
+After=network.target xymonproxy.service
+
+[Service]
+Type=simple
+User=xymon
+Group=xymon
+ExecStart=/usr/bin/python3 /srv/xymon/server/bin/xymon-http-gateway.py --listen-host=127.0.0.1 --listen-port=1985 --backend-host=127.0.0.1 --backend-port=1984 --minicfg-hosts-file=/home/xymon/server/etc/hosts.cfg --minicfg-dir=/home/xymon/minicfg --minicfg-client-ip-header=X-Real-IP
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target
