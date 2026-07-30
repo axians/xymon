@@ -9,8 +9,9 @@ XYMONTIMELIBS = $(XYMONTIMELIB) $(LIBRTDEF)
 
 PROGRAMS = xymonproxy xymoncgimsg.cgi
 
-PROXYOBJS = xymonproxy.o
+PROXYOBJS = xymonproxy.o filter.o
 MSGCGIOBJS = xymoncgimsg.o
+TESTFILTEROBJS = test-filter.o filter.o
 
 all: $(PROGRAMS)
 
@@ -20,6 +21,10 @@ xymonproxy: $(PROXYOBJS) $(XYMONCOMMLIB) $(XYMONTIMELIB) $(XYMONLIB)
 xymoncgimsg.cgi: $(MSGCGIOBJS) $(XYMONCOMMLIB) $(XYMONLIB)
 	$(CC) $(CFLAGS) -o $@ $(MSGCGIOBJS) $(XYMONCOMMLIBS) $(XYMONLIBS) 
 
+test-filter: $(TESTFILTEROBJS)
+	$(CC) $(CFLAGS) -o $@ $(TESTFILTEROBJS)
+	./test-filter
+
 ################################################
 # Default compilation rules
 ################################################
@@ -27,7 +32,7 @@ xymoncgimsg.cgi: $(MSGCGIOBJS) $(XYMONCOMMLIB) $(XYMONLIB)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f *.o *.a *~ $(PROGRAMS)
+	rm -f *.o *.a *~ $(PROGRAMS) test-filter
 
 install: install-bin install-man
 

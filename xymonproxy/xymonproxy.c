@@ -35,6 +35,7 @@ static char rcsid[] = "$Id$";
 
 #include "version.h"
 #include "libxymon.h"
+#include "filter.h"
 
 enum phase_t {
 	P_IDLE, 
@@ -98,11 +99,14 @@ typedef struct conn_t {
 #define MINIMUM_FOR_COMBO 2048	/* To start merging messages, at least have 2 KB free */
 #define MAXIMUM_FOR_COMBO 32768 /* Max. size of a combined message */
 #define COMBO_DELAY 250000000	/* Delay before sending a combo message (in nanoseconds) */
+#define HOSTS_CHECK_INTERVAL 30	/* Seconds between hosts.cfg change checks */
 
 int keeprunning = 1;
 time_t laststatus = 0;
 char *logfile = NULL;
+char *hostsfile = NULL;
 int logdetails = 0;
+volatile sig_atomic_t reloadhosts = 0;
 unsigned long msgs_timeout_from[P_CLEANUP+1] = { 0, };
 
 
@@ -115,6 +119,7 @@ void sigmisc_handler(int signum)
 		break;
 
 	  case SIGHUP:
+		reloadhosts = 1;
 		if (logfile) {
 			reopen_file(logfile, "a", stdout);
 			reopen_file(logfile, "a", stderr);
@@ -210,6 +215,64 @@ void do_log(conn_t *conn)
 	if (eol) *eol = '\n';
 }
 
+static int load_filter_hostnames(const char *hostsfn, proxy_filter_t **newfilter,
+				 char *error, size_t error_size)
+{
+	char *localhostsfn;
+	void *host;
+	int loadresult;
+	int hostcount = 0;
+	proxy_filter_t *filter;
+
+	*newfilter = NULL;
+
+	localhostsfn = (char *)malloc(strlen(hostsfn) + 2);
+	if (!localhostsfn) {
+		snprintf(error, error_size, "Cannot allocate hosts filename: %s", hostsfn);
+		return -1;
+	}
+	localhostsfn[0] = '!';
+	strcpy(localhostsfn + 1, hostsfn);
+	loadresult = load_hostnames(localhostsfn, NULL, get_fqdn());
+	free(localhostsfn);
+	if (loadresult < 0) {
+		snprintf(error, error_size, "Cannot load hosts file: %s", hostsfn);
+		return -1;
+	}
+	if (loadresult > 0) return 1;
+
+	filter = proxy_filter_create();
+	if (!filter) {
+		snprintf(error, error_size, "Cannot allocate hostname filter");
+		return -1;
+	}
+
+	for (host = first_host(); host; host = next_host(host, 0)) {
+		char *hostname = xmh_item(host, XMH_HOSTNAME);
+		char *clientalias = xmh_item(host, XMH_CLIENTALIAS);
+
+		if (hostname &&
+		    (proxy_filter_add_hostname(filter, hostname, error, error_size) != 0)) {
+			proxy_filter_destroy(filter);
+			return -1;
+		}
+		if (clientalias &&
+		    (proxy_filter_add_hostname(filter, clientalias, error, error_size) != 0)) {
+			proxy_filter_destroy(filter);
+			return -1;
+		}
+		if (hostname) hostcount++;
+	}
+
+	if (hostcount == 0) {
+		snprintf(error, error_size, "Hosts file is empty: %s", hostsfn);
+		proxy_filter_destroy(filter);
+		return -1;
+	}
+	*newfilter = filter;
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int daemonize = 1;
@@ -224,7 +287,11 @@ int main(int argc, char *argv[])
 	struct sockaddr_in laddr;
 	struct sockaddr_in xymonserveraddr[MAX_SERVERS];
 	int xymonservercount = 0;
+	proxy_filter_t *commandfilter;
+	proxy_filter_t *hostfilter = NULL;
+	char filtererror[256];
 	int opt;
+	time_t next_hostcheck = 0;
 	conn_t *chead = NULL;
 	struct sigaction sa;
 	int selectfailures = 0;
@@ -239,6 +306,8 @@ int main(int argc, char *argv[])
 	unsigned long msgs_status = 0;
 	unsigned long msgs_combo = 0;
 	unsigned long msgs_other = 0;
+	unsigned long msgs_command_filtered = 0;
+	unsigned long msgs_host_filtered = 0;
 	unsigned long msgs_recovered = 0;
 	struct timespec timeinqueue = { 0, 0 };
 
@@ -249,6 +318,11 @@ int main(int argc, char *argv[])
 	inet_aton("0.0.0.0", (struct in_addr *) &laddr.sin_addr.s_addr);
 	laddr.sin_port = htons(1984);
 	laddr.sin_family = AF_INET;
+	commandfilter = proxy_filter_create();
+	if (!commandfilter) {
+		errprintf("Cannot allocate proxy filter\n");
+		return 1;
+	}
 
 	for (opt=1; (opt < argc); opt++) {
 		if (argnmatch(argv[opt], "--listen=")) {
@@ -302,6 +376,20 @@ int main(int argc, char *argv[])
 			char *p = strchr(argv[opt], '=');
 			listenq = atoi(p+1);
 		}
+		else if (argnmatch(argv[opt], "--allow-command=")) {
+			char *p = strchr(argv[opt], '=') + 1;
+			if (proxy_filter_add_commands(commandfilter, p, filtererror, sizeof(filtererror)) != 0) {
+				errprintf("%s\n", filtererror);
+				return 1;
+			}
+		}
+		else if (argnmatch(argv[opt], "--hosts=")) {
+			hostsfile = strchr(argv[opt], '=') + 1;
+			if (!*hostsfile) {
+				errprintf("Invalid hosts file: empty filename\n");
+				return 1;
+			}
+		}
 		else if (strcmp(argv[opt], "--daemon") == 0) {
 			daemonize = 1;
 		}
@@ -354,6 +442,8 @@ int main(int argc, char *argv[])
 			printf("\t--report=[HOST.]SERVICE     : Sends a status message about proxy activity\n");
 			printf("\t--timeout=N                 : Communications timeout (seconds)\n");
 			printf("\t--lqueue=N                  : Listen-queue size\n");
+			printf("\t--allow-command=LIST        : Forward only listed Xymon commands\n");
+			printf("\t--hosts=FILENAME            : Forward only hosts listed in hosts.cfg\n");
 			printf("\t--daemon                    : Run as a daemon\n");
 			printf("\t--no-daemon                 : Do not run as a daemon\n");
 			printf("\t--pidfile=FILENAME          : Save process-ID of daemon to FILENAME\n");
@@ -367,6 +457,14 @@ int main(int argc, char *argv[])
 	if (xymonservercount == 0) {
 		errprintf("No Xymon server address given - aborting\n");
 		return 1;
+	}
+	if (hostsfile) {
+		if (load_filter_hostnames(hostsfile, &hostfilter, filtererror,
+					  sizeof(filtererror)) != 0) {
+			errprintf("%s\n", filtererror);
+			return 1;
+		}
+		next_hostcheck = gettimer() + HOSTS_CHECK_INTERVAL;
 	}
 
 	/* Set up a socket to listen for new connections */
@@ -450,6 +548,26 @@ int main(int argc, char *argv[])
 		time_t now;
 		int combining = 0;
 
+		now = gettimer();
+		if (hostsfile && (reloadhosts || (now >= next_hostcheck))) {
+			int loadresult;
+			proxy_filter_t *newhostfilter;
+
+			reloadhosts = 0;
+			next_hostcheck = now + HOSTS_CHECK_INTERVAL;
+			loadresult = load_filter_hostnames(hostsfile, &newhostfilter,
+							  filtererror, sizeof(filtererror));
+			if (loadresult == 0) {
+				proxy_filter_destroy(hostfilter);
+				hostfilter = newhostfilter;
+				errprintf("Reloaded hosts file %s\n", hostsfile);
+			}
+			else if (loadresult < 0) {
+				errprintf("Hosts reload failed, keeping previous configuration: %s\n",
+					  filtererror);
+			}
+		}
+
 		/* See if it is time for a status report */
 		if (proxyname && ((now = gettimer()) >= (laststatus+300))) {
 			conn_t *stentry;
@@ -493,9 +611,11 @@ int main(int argc, char *argv[])
 			}
 
 			p = stentry->buf;
-			p += sprintf(p, "combo\nstatus+11 %s green %s - xymon proxy up: %s\n\nxymonproxy for Xymon version %s\n\nProxy statistics\n\nIncoming messages        : %10lu (%lu msgs/second)\nOutbound messages        : %10lu\n\nIncoming message distribution\n- Combo messages         : %10lu\n- Status messages        : %10lu\n  Messages merged        : %10lu\n  Resulting combos       : %10lu\n- Other messages         : %10lu\n\nProxy resources\n- Connection table size  : %10d\n- Buffer space           : %10lu kByte\n",
+			p += sprintf(p, "combo\nstatus+11 %s green %s - xymon proxy up: %s\n\nxymonproxy for Xymon version %s\n\nProxy statistics\n\nIncoming messages        : %10lu (%lu msgs/second)\nCommand filtered messages: %10lu\nHost filtered messages   : %10lu\nOutbound messages        : %10lu\n\nIncoming message distribution\n- Combo messages         : %10lu\n- Status messages        : %10lu\n  Messages merged        : %10lu\n  Resulting combos       : %10lu\n- Other messages         : %10lu\n\nProxy resources\n- Connection table size  : %10d\n- Buffer space           : %10lu kByte\n",
 				proxyname, timestamp, runtime_s, VERSION,
 				msgs_total, (msgs_total - msgs_total_last) / (now - laststatus),
+				msgs_command_filtered,
+				msgs_host_filtered,
 				msgs_delivered,
 				msgs_combo, 
 				msgs_status, msgs_merged, msgs_combined, 
@@ -545,6 +665,20 @@ int main(int argc, char *argv[])
 				}
 
 				if (logdetails) do_log(cwalk);
+				if ((cwalk->csocket >= 0) &&
+				    !proxy_filter_allows(commandfilter, cwalk->buf+6)) {
+					msgs_command_filtered++;
+					dbgprintf("Command-filtered message from %s\n", inet_ntoa(*cwalk->clientip));
+					cwalk->state = P_CLEANUP;
+					break;
+				}
+				if ((cwalk->csocket >= 0) && hostfilter &&
+				    !proxy_filter_allows(hostfilter, cwalk->buf+6)) {
+					msgs_host_filtered++;
+					dbgprintf("Host-filtered message from %s\n", inet_ntoa(*cwalk->clientip));
+					cwalk->state = P_CLEANUP;
+					break;
+				}
 				cwalk->conntries = CONNECT_TRIES;
 				cwalk->sendtries = SEND_TRIES;
 				cwalk->conntime = 0;
@@ -1175,6 +1309,8 @@ int main(int argc, char *argv[])
 		}
 	} while (keeprunning);
 
+	proxy_filter_destroy(commandfilter);
+	proxy_filter_destroy(hostfilter);
 	if (pidfile) unlink(pidfile);
 	return 0;
 }
