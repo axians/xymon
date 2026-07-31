@@ -139,6 +139,7 @@ typedef struct tcptest_t {
 	/* For HTTP/2 (when ALPN negotiated "h2") */
 	int http2;			/* Set when the connection speaks HTTP/2 */
 	void *h2session;		/* Opaque h2conn_t*, managed by http2.c */
+	int http2sendpending;		/* 1: retry on write, 2: retry SSL_write on read */
 
 	struct tcptest_t *next;
 } tcptest_t;

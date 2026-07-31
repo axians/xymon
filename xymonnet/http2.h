@@ -28,17 +28,17 @@ extern int http2_start(void *item);
 
 /*
  * Flush any pending HTTP/2 output frames to the socket. Returns 0 when all
- * currently-queued output has been written, 1 if more remains to be sent
- * later, -1 on I/O error.
+ * currently-queued output has been written, 1 if more remains for write
+ * readiness, 2 if SSL_write must be retried on read readiness, or -1 on error.
  */
 extern int http2_senddata(void *item);
 
 /*
  * Feed inbound bytes to the nghttp2 session. Response headers/body are
  * synthesized back into HTTP/1.1-shaped text and pushed through the item's
- * datacallback. Returns 2 when pending control frames require socket write
- * readiness, 1 when the response stream is complete, 0 if more data is
- * expected, or -1 on error.
+ * datacallback. Returns 2 or 3 when pending control frames require write or
+ * read readiness respectively, 1 when the response stream is complete, 0 if
+ * more data is expected, or -1 on error.
  */
 extern int http2_recvdata(void *item, char *buf, int len);
 

@@ -60,8 +60,14 @@ typedef struct h2conn_t {
 	strbuffer_t *resphdrs;		/* collected "name: value\r\n" lines */
 	strbuffer_t *respbody;		/* response body bytes */
 	int stream_closed;		/* set when the response stream ends */
+	uint32_t stream_error;		/* error code reported when the stream closes */
+	int stream_reset;		/* peer sent RST_STREAM, including NO_ERROR */
 	int response_emitted;		/* guard against emitting twice */
 } h2conn_t;
+
+
+#define H2_WRITE_WANT_WRITE -2
+#define H2_WRITE_WANT_READ  -3
 
 
 static int h2_write(h2conn_t *h2, const unsigned char *buf, size_t len)
@@ -71,13 +77,14 @@ static int h2_write(h2conn_t *h2, const unsigned char *buf, size_t len)
 
 	if (item->ssldata) res = SSL_write(item->ssldata, buf, len);
 	else res = write(item->fd, buf, len);
-	if (res < 0) {
-		if (!item->ssldata && ((errno == EAGAIN) || (errno == EWOULDBLOCK))) return 0;
+	if (res <= 0) {
+		if (!item->ssldata && ((errno == EAGAIN) || (errno == EWOULDBLOCK))) return H2_WRITE_WANT_WRITE;
 		if (!item->ssldata) return -1;
 		switch (SSL_get_error(item->ssldata, res)) {
 		  case SSL_ERROR_WANT_READ:
+			return H2_WRITE_WANT_READ;
 		  case SSL_ERROR_WANT_WRITE:
-			return 0;	/* Try again later */
+			return H2_WRITE_WANT_WRITE;
 		  default:
 			return -1;	/* Hard error */
 		}
@@ -117,9 +124,11 @@ static int h2_on_header_cb(nghttp2_session *session, const nghttp2_frame *frame,
 
 	if (frame->hd.type != NGHTTP2_HEADERS) return 0;
 	if (frame->headers.cat != NGHTTP2_HCAT_RESPONSE) return 0;
+	if (frame->hd.stream_id != h2->stream_id) return 0;
 
 	if ((namelen == 7) && (memcmp(name, ":status", 7) == 0)) {
-		h2->status = atoi((const char *)value);
+		if ((valuelen != 3) || !isdigit(value[0]) || !isdigit(value[1]) || !isdigit(value[2])) return NGHTTP2_ERR_CALLBACK_FAILURE;
+		h2->status = ((value[0] - '0') * 100) + ((value[1] - '0') * 10) + (value[2] - '0');
 		return 0;
 	}
 
@@ -143,6 +152,7 @@ static int h2_on_data_chunk_cb(nghttp2_session *session, uint8_t flags,
 {
 	h2conn_t *h2 = (h2conn_t *)user_data;
 
+	if (stream_id != h2->stream_id) return 0;
 	addtobufferraw(h2->respbody, (char *)data, len);
 	return 0;
 }
@@ -153,7 +163,21 @@ static int h2_on_stream_close_cb(nghttp2_session *session, int32_t stream_id,
 {
 	h2conn_t *h2 = (h2conn_t *)user_data;
 
-	if (stream_id == h2->stream_id) h2->stream_closed = 1;
+	if (stream_id == h2->stream_id) {
+		h2->stream_error = error_code;
+		h2->stream_closed = 1;
+	}
+	return 0;
+}
+
+
+static int h2_on_frame_recv_cb(nghttp2_session *session,
+			       const nghttp2_frame *frame, void *user_data)
+{
+	h2conn_t *h2 = (h2conn_t *)user_data;
+
+	if ((frame->hd.type == NGHTTP2_RST_STREAM) && (frame->hd.stream_id == h2->stream_id))
+		h2->stream_reset = 1;
 	return 0;
 }
 
@@ -300,31 +324,37 @@ int http2_start(void *itemv)
 	h2->status = 0;
 	h2->resphdrs = newstrbuffer(0);
 	h2->respbody = newstrbuffer(0);
-	item->h2session = h2;
 
-	nghttp2_session_callbacks_new(&cbs);
+	if (nghttp2_session_callbacks_new(&cbs) != 0) goto initerror;
 	nghttp2_session_callbacks_set_on_header_callback(cbs, h2_on_header_cb);
 	nghttp2_session_callbacks_set_on_data_chunk_recv_callback(cbs, h2_on_data_chunk_cb);
 	nghttp2_session_callbacks_set_on_stream_close_callback(cbs, h2_on_stream_close_cb);
+	nghttp2_session_callbacks_set_on_frame_recv_callback(cbs, h2_on_frame_recv_cb);
 
 	if (nghttp2_session_client_new(&h2->session, cbs, h2) != 0) {
 		nghttp2_session_callbacks_del(cbs);
-		item->errcode = CONTEST_ESSL;
-		return -1;
+		goto initerror;
 	}
 	nghttp2_session_callbacks_del(cbs);
 
 	/* HTTP/2 connections must open with a SETTINGS frame. */
 	iv[0].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
 	iv[0].value = 100;
-	nghttp2_submit_settings(h2->session, NGHTTP2_FLAG_NONE, iv, 1);
+	if (nghttp2_submit_settings(h2->session, NGHTTP2_FLAG_NONE, iv, 1) != 0) goto initerror;
 
-	if (h2_submit_request(h2) != 0) {
-		item->errcode = CONTEST_ESSL;
-		return -1;
-	}
+	if (h2_submit_request(h2) != 0) goto initerror;
 
+	item->h2session = h2;
 	return 0;
+
+initerror:
+	if (h2->session) nghttp2_session_del(h2->session);
+	if (h2->resphdrs) freestrbuffer(h2->resphdrs);
+	if (h2->respbody) freestrbuffer(h2->respbody);
+	if (h2->reqbody) free((void *)h2->reqbody);
+	xfree(h2);
+	item->errcode = CONTEST_ESSL;
+	return -1;
 }
 
 
@@ -340,6 +370,8 @@ int http2_senddata(void *itemv)
 	/* Flush any previously-buffered partial write first. */
 	if (h2->pendlen > h2->pendofs) {
 		int w = h2_write(h2, h2->pend + h2->pendofs, h2->pendlen - h2->pendofs);
+		if (w == H2_WRITE_WANT_READ) return 2;
+		if (w == H2_WRITE_WANT_WRITE) return 1;
 		if (w < 0) return -1;
 		h2->pendofs += w;
 		if (h2->pendofs < h2->pendlen) return 1;	/* Still more to send */
@@ -347,16 +379,22 @@ int http2_senddata(void *itemv)
 	}
 
 	while ((n = nghttp2_session_mem_send(h2->session, &data)) > 0) {
-		int w = h2_write(h2, data, n);
+		int w;
+
+		/* OpenSSL requires WANT_* retries to use the same buffer address. */
+		h2->pendlen = n;
+		h2->pendofs = 0;
+		h2->pend = (unsigned char *)malloc(h2->pendlen);
+		memcpy(h2->pend, data, h2->pendlen);
+		w = h2_write(h2, h2->pend, h2->pendlen);
+		if (w == H2_WRITE_WANT_READ) return 2;
+		if (w == H2_WRITE_WANT_WRITE) return 1;
 		if (w < 0) return -1;
 		if (w < n) {
-			/* Socket not ready for the rest - buffer it for later. */
-			h2->pendlen = n - w;
-			h2->pendofs = 0;
-			h2->pend = (unsigned char *)malloc(h2->pendlen);
-			memcpy(h2->pend, data + w, h2->pendlen);
+			h2->pendofs = w;
 			return 1;
 		}
+		xfree(h2->pend); h2->pend = NULL; h2->pendlen = h2->pendofs = 0;
 	}
 	if (n < 0) return -1;
 
@@ -403,23 +441,30 @@ int http2_recvdata(void *itemv, char *buf, int len)
 {
 	tcptest_t *item = (tcptest_t *)itemv;
 	h2conn_t *h2 = (h2conn_t *)item->h2session;
-	ssize_t r;
+	ssize_t r, consumed = 0;
 	int sendresult;
 
 	if (!h2) return -1;
 
-	r = nghttp2_session_mem_recv(h2->session, (const uint8_t *)buf, len);
-	if (r < 0) { item->errcode = CONTEST_EIO; return -1; }
+	while (consumed < len) {
+		r = nghttp2_session_mem_recv(h2->session, (const uint8_t *)buf + consumed, len - consumed);
+		if (r <= 0) { item->errcode = CONTEST_EIO; return -1; }
+		consumed += r;
+	}
 
 	/* Receiving may have queued SETTINGS-ack / WINDOW_UPDATE / PING output. */
 	sendresult = http2_senddata(item);
 	if (sendresult < 0) return -1;
 
 	if (h2->stream_closed) {
+		if (h2->stream_reset || (h2->stream_error != NGHTTP2_NO_ERROR)) {
+			item->errcode = CONTEST_EIO;
+			return -1;
+		}
 		h2_emit_response(h2);
 		return 1;
 	}
-	return (sendresult > 0 ? 2 : 0);
+	return (sendresult > 0 ? sendresult + 1 : 0);
 }
 
 

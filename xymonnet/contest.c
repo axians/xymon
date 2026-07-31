@@ -1176,7 +1176,7 @@ restartselect:
 				 * So: On any given socket, we want either a 
 				 * write-event or a read-event - never both.
 				 */
-				if (item->readpending)
+				if (item->readpending || (item->http2sendpending == 2))
 					FD_SET(item->fd, &readfds);
 				else 
 					FD_SET(item->fd, &writefds);
@@ -1340,10 +1340,12 @@ restartselect:
 							if (item->h2session) {
 								s = http2_senddata(item);
 								if (s < 0) {
+									item->http2sendpending = 0;
 									item->readpending = 0;
 									item->errcode = CONTEST_EIO;
 								}
 								else {
+									item->http2sendpending = s;
 									item->readpending = (s == 0);
 								}
 							}
@@ -1389,7 +1391,7 @@ restartselect:
 
 						/* If closed and/or no bannergrabbing, shut down socket */
 						if (item->sslrunning != SSLSETUP_PENDING) {
-							if (!item->open || !item->readpending) {
+							if (!item->open || (!item->readpending && !item->http2sendpending)) {
 								if (item->open) {
 									socket_shutdown(item);
 								}
@@ -1416,6 +1418,29 @@ restartselect:
 
 						item->lastactive = timestamp.tv_sec;
 
+						if (item->http2sendpending == 2) {
+							res = http2_senddata(item);
+							if (res < 0) {
+								item->http2sendpending = 0;
+								item->readpending = 0;
+								item->errcode = CONTEST_EIO;
+								if (item->open) socket_shutdown(item);
+								close(item->fd);
+								get_totaltime(item, &timestamp);
+								if (item->finalcallback) item->finalcallback(item->priv);
+								http2_cleanup(item);
+								item->fd = -1;
+								activesockets--;
+								pending--;
+								if (item == firstactive) firstactive = item->next;
+							}
+							else {
+								item->http2sendpending = res;
+								item->readpending = (res == 0);
+							}
+							continue;
+						}
+
 						/*
 						 * We may be in the process of setting up an SSL connection
 						 */
@@ -1428,6 +1453,12 @@ restartselect:
 						res = socket_read(item, msgbuf, sizeof(msgbuf)-1);
 						tcp_stats_read += res;
 						dbgprintf("read %d bytes from socket\n", res);
+						if ((res <= 0) && item->http2 && !item->sslagain) {
+							if (!item->ssldata && (res < 0) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
+								wantmoredata = 1;
+							else
+								item->errcode = CONTEST_EIO;
+						}
 
 						if ((res > 0) && item->http2) {
 							/*
@@ -1437,7 +1468,10 @@ restartselect:
 							 */
 							int d = http2_recvdata(item, msgbuf, res);
 							datadone = ((d == 1) || (d < 0));
-							if (d == 2) item->readpending = 0;
+							if (d > 1) {
+								item->http2sendpending = d - 1;
+								item->readpending = 0;
+							}
 						}
 						else if ((res > 0) && item->datacallback) {
 							datadone = item->datacallback(msgbuf, res, item->priv);
