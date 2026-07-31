@@ -1436,7 +1436,8 @@ restartselect:
 							 * through the datacallback when complete.
 							 */
 							int d = http2_recvdata(item, msgbuf, res);
-							datadone = (d != 0);	/* done on completion (1) or error (-1) */
+							datadone = ((d == 1) || (d < 0));
+							if (d == 2) item->readpending = 0;
 						}
 						else if ((res > 0) && item->datacallback) {
 							datadone = item->datacallback(msgbuf, res, item->priv);

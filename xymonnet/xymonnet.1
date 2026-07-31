@@ -290,8 +290,10 @@ handshake; servers that do not support HTTP/2 are tested over HTTP/1.1
 as before. HTTP/2 can be required with the "httpsh2://" scheme, or
 disabled per-test by pinning HTTP/1.x with "https11://". See
 .I hosts.cfg(5)
-for details. If xymonnet was built without nghttp2, HTTP/2 is not
-offered and "httpsh2://" tests report an error.
+for details. Cleartext HTTP/2 prior knowledge is available for direct tests
+with "httph2://"; HTTP/1.1 Upgrade and proxying are not supported. If xymonnet
+was built without nghttp2, HTTP/2 is not offered and required HTTP/2 tests
+report an error.
 
 .SH OPTIONS FOR SSL CERTIFICATE TESTS
 .IP \-\-ssl=SSLCERTTESTNAME

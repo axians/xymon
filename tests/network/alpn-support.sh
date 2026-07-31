@@ -29,8 +29,11 @@ HDR="$ROOT/lib/netservices.h"
 SRC="$ROOT/lib/netservices.c"
 SSL="$ROOT/xymonnet/contest.c"
 MAN="$ROOT/xymonnet/protocols.cfg.5"
+HTTP="$ROOT/xymonnet/httptest.c"
+HTTP2="$ROOT/xymonnet/http2.c"
+HOSTSMAN="$ROOT/common/hosts.cfg.5"
 
-for f in "$HDR" "$SRC" "$SSL" "$MAN"; do
+for f in "$HDR" "$SRC" "$SSL" "$MAN" "$HTTP" "$HTTP2" "$HOSTSMAN"; do
 	[ -f "$f" ] || skip "$(basename "$f") absent"
 done
 
@@ -77,5 +80,16 @@ grep -Eq 'SSL_CTX_set_alpn_protos\(item->sslctx, *alpn_buffer,' "$SSL" \
 # tree that lost the docs is a regression, not a legitimate skip.
 assert_contains "alpn=" "$(cat "$MAN")" \
 	"protocols.cfg.5 no longer documents the alpn= option (#37)"
+
+http=$(cat "$HTTP")
+http2=$(cat "$HTTP2")
+assert_contains 'h2_prior_knowledge = 1' "$http" \
+	"httptest.c no longer enables cleartext HTTP/2 prior knowledge"
+assert_contains 'else res = write(item->fd, buf, len)' "$http2" \
+	"http2.c no longer sends cleartext HTTP/2 frames over the socket"
+assert_contains '(h2->item->ssldata ? "https" : "http")' "$http2" \
+	"http2.c no longer selects the correct HTTP/2 :scheme"
+assert_contains 'httph2://' "$(cat "$HOSTSMAN")" \
+	"hosts.cfg.5 no longer documents cleartext HTTP/2 prior knowledge"
 
 pass "xymonnet keeps the #37 ALPN wiring (flag, parser, SSL setup, manpage)"

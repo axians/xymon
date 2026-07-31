@@ -11,8 +11,8 @@
 /* response callback. That way none of the surrounding HTTP test logic needs  */
 /* to know which protocol version was actually used on the wire.             */
 /*                                                                            */
-/* When built without nghttp2 (or without OpenSSL, since h2 here is only ever */
-/* spoken over TLS) these functions compile to stubs reporting "unavailable". */
+/* When built without nghttp2 or OpenSSL these functions compile to stubs     */
+/* reporting "unavailable".                                                   */
 /*                                                                            */
 /* Copyright (C) 2003-2011 Henrik Storner <henrik@hswn.dk>                    */
 /*                                                                            */
@@ -30,6 +30,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <errno.h>
+#include <unistd.h>
 
 #include <nghttp2/nghttp2.h>
 
@@ -62,13 +64,16 @@ typedef struct h2conn_t {
 } h2conn_t;
 
 
-static int h2_ssl_write(h2conn_t *h2, const unsigned char *buf, size_t len)
+static int h2_write(h2conn_t *h2, const unsigned char *buf, size_t len)
 {
 	tcptest_t *item = h2->item;
 	int res;
 
-	res = SSL_write(item->ssldata, buf, len);
+	if (item->ssldata) res = SSL_write(item->ssldata, buf, len);
+	else res = write(item->fd, buf, len);
 	if (res < 0) {
+		if (!item->ssldata && ((errno == EAGAIN) || (errno == EWOULDBLOCK))) return 0;
+		if (!item->ssldata) return -1;
 		switch (SSL_get_error(item->ssldata, res)) {
 		  case SSL_ERROR_WANT_READ:
 		  case SSL_ERROR_WANT_WRITE:
@@ -165,7 +170,8 @@ static int h2_on_stream_close_cb(nghttp2_session *session, int32_t stream_id,
 static int h2_submit_request(h2conn_t *h2)
 {
 	char *reqcopy, *line, *saveptr, *body = NULL;
-	char *method = NULL, *path = NULL, *authority = NULL, *scheme = "https";
+	char *method = NULL, *path = NULL, *authority = NULL;
+	char *scheme = (h2->item->ssldata ? "https" : "http");
 	nghttp2_nv *nva = NULL;
 	int nvcount = 0, nvmax = 8;
 	int32_t sid;
@@ -333,7 +339,7 @@ int http2_senddata(void *itemv)
 
 	/* Flush any previously-buffered partial write first. */
 	if (h2->pendlen > h2->pendofs) {
-		int w = h2_ssl_write(h2, h2->pend + h2->pendofs, h2->pendlen - h2->pendofs);
+		int w = h2_write(h2, h2->pend + h2->pendofs, h2->pendlen - h2->pendofs);
 		if (w < 0) return -1;
 		h2->pendofs += w;
 		if (h2->pendofs < h2->pendlen) return 1;	/* Still more to send */
@@ -341,7 +347,7 @@ int http2_senddata(void *itemv)
 	}
 
 	while ((n = nghttp2_session_mem_send(h2->session, &data)) > 0) {
-		int w = h2_ssl_write(h2, data, n);
+		int w = h2_write(h2, data, n);
 		if (w < 0) return -1;
 		if (w < n) {
 			/* Socket not ready for the rest - buffer it for later. */
@@ -398,6 +404,7 @@ int http2_recvdata(void *itemv, char *buf, int len)
 	tcptest_t *item = (tcptest_t *)itemv;
 	h2conn_t *h2 = (h2conn_t *)item->h2session;
 	ssize_t r;
+	int sendresult;
 
 	if (!h2) return -1;
 
@@ -405,13 +412,14 @@ int http2_recvdata(void *itemv, char *buf, int len)
 	if (r < 0) { item->errcode = CONTEST_EIO; return -1; }
 
 	/* Receiving may have queued SETTINGS-ack / WINDOW_UPDATE / PING output. */
-	if (http2_senddata(item) < 0) return -1;
+	sendresult = http2_senddata(item);
+	if (sendresult < 0) return -1;
 
 	if (h2->stream_closed) {
 		h2_emit_response(h2);
 		return 1;
 	}
-	return 0;
+	return (sendresult > 0 ? 2 : 0);
 }
 
 

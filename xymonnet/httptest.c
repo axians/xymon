@@ -344,6 +344,7 @@ void add_http_test(testitem_t *t)
 	int sslopt_version = SSLVERSION_DEFAULT;
 	char *sslopt_clientcert = NULL;
 	char *sslopt_alpns = NULL;
+	int h2_prior_knowledge = 0;
 	int  httpversion = HTTPVER_11;
 	cookielist_t *ck = NULL;
 	int firstcookie = 1;
@@ -502,8 +503,14 @@ void add_http_test(testitem_t *t)
 			 * (SSLv2) substrings would match it by accident.
 			 */
 			if (strcmp(httptest->weburl.desturl->schemeopts, "h2") == 0) {
-				/* httpsh2:// - require HTTP/2 (offer only "h2" via ALPN) */
-				sslopt_alpns = "h2";
+				if (strcmp(httptest->weburl.desturl->scheme, "https") == 0) {
+					/* httpsh2:// - require HTTP/2 (offer only "h2" via ALPN) */
+					sslopt_alpns = "h2";
+				}
+				else {
+					/* httph2:// - require cleartext HTTP/2 prior knowledge */
+					h2_prior_knowledge = 1;
+				}
 			}
 			else {
 				if      (strstr(httptest->weburl.desturl->schemeopts, "3"))      sslopt_version = SSLVERSION_V3;
@@ -734,6 +741,8 @@ void add_http_test(testitem_t *t)
 						 t->testspec, t->silenttest, grabstrbuffer(httprequest), 
 						 httptest, tcp_http_data_callback, tcp_http_final_callback);
 	}
+
+	if (h2_prior_knowledge) httptest->tcptest->http2 = 1;
 
 	if (hinfo && xmh_item(hinfo, XMH_FLAG_SNI))
 		httptest->tcptest->sni = httptest->weburl.desturl->host;

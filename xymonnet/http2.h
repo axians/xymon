@@ -19,10 +19,10 @@
 extern int http2_available(void);
 
 /*
- * Start an HTTP/2 exchange on an already-TLS-connected test item whose ALPN
- * negotiated "h2". Sets up the nghttp2 session and submits the request that
- * was built (as HTTP/1.1 text) in item->sendtxt. Returns 0 on success, -1 on
- * error (item->errcode is set).
+ * Start an HTTP/2 exchange after ALPN negotiated "h2", or on a cleartext
+ * prior-knowledge connection. Sets up the nghttp2 session and submits the
+ * request that was built (as HTTP/1.1 text) in item->sendtxt. Returns 0 on
+ * success, -1 on error (item->errcode is set).
  */
 extern int http2_start(void *item);
 
@@ -36,8 +36,9 @@ extern int http2_senddata(void *item);
 /*
  * Feed inbound bytes to the nghttp2 session. Response headers/body are
  * synthesized back into HTTP/1.1-shaped text and pushed through the item's
- * datacallback. Returns 1 when the response stream is complete, 0 if more
- * data is expected, -1 on error.
+ * datacallback. Returns 2 when pending control frames require socket write
+ * readiness, 1 when the response stream is complete, 0 if more data is
+ * expected, or -1 on error.
  */
 extern int http2_recvdata(void *item, char *buf, int len);
 
