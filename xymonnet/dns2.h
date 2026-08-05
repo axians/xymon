@@ -20,6 +20,8 @@ typedef struct dns_resp_t {
 extern void dns_detail_callback(void *arg, int status, int timeouts, unsigned char *abuf, int alen);
 extern int dns_soa_is_predecessor(unsigned int candidate, unsigned int reference);
 extern int dns_name_type(char *name);
+extern int dns_decode_content_pattern(char *pattern, unsigned char **decoded, char *error, size_t errorlen);
+extern int dns_response_matches(const char *response, const char *pattern, char *error, size_t errorlen);
 
 /*
  * Cross-NS consistency check (issue #235). Both functions operate on raw

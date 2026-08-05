@@ -942,7 +942,8 @@ for testing described for the "dns" test are also available for
 the "dig" test.
 
 .IP "dns=hostname"
-.IP "dns=TYPE:lookup[,TYPE:lookup...]
+.IP "dns=TYPE:lookup[,TYPE:lookup...]"
+.IP "dns=TYPE:lookup;expected_data_regexp"
 The default DNS tests will attempt a DNS lookup
 of the DNS' servers own hostname. You can specify the hostname
 to lookup on a DNS server by listing it on each test.
@@ -957,6 +958,55 @@ NS (Name Server) are among the more common ones used. The
 the nameservers for the "bar.org" domain, "dns=ns:bar.org". 
 You can list multiple lookups, separated by commas. For the
 test to end up with a green status, all lookups must succeed.
+
+The third form also requires the rendered DNS response to match
+the POSIX extended regular expression after the semicolon. It is
+useful for checking record content.
+The expression is matched against the returned answer, authority and
+additional sections for that lookup. The question and response headers
+are excluded.
+As with the HTTP "cont" test, Xymon first decodes the backslash
+escape sequences "\en", "\er", "\et", "\e\e" and "\exNN". A
+backslash intended for the regular expression must therefore be
+escaped itself. For example, write "\e\e." in hosts.cfg to match a
+literal dot. Unknown or malformed escape sequences, and escapes that
+decode to a NUL byte, fail the DNS test.
+Whitespace cannot appear literally in a hosts.cfg tag; use a
+character class such as "[[:space:]]" when whitespace is required.
+An invalid expression or a response that does not match fails the
+DNS test. A content-matched tag contains exactly one lookup; configure
+additional matched lookups as separate "dns=" tags. Multiple tags on
+the same host are combined into one DNS status, which fails if any tag
+fails. Existing
+comma-separated lookups remain available when no content expression
+is specified.
+
+The following complete hosts.cfg entries illustrate common checks.
+The 192.0.2.0/24 addresses are documentation examples; replace them
+with the address and hostname of the DNS server being monitored. Each
+line is an independent example; combine the desired "dns=" tags on one
+host entry instead of defining the same host more than once.
+.br
+.nf
+   # TXT verification token
+   192.0.2.53 dns1.example # noconn dns=TXT:_verify.example.com;verification=ready
+
+   # Exact A record (double the backslash passed to the regular expression)
+   192.0.2.53 dns1.example # noconn dns=A:www.example.com;192\e\e.0\e\e.2\e\e.10
+
+   # MX preference and target; [[:space:]] matches rendered whitespace
+   192.0.2.53 dns1.example # noconn dns=MX:example.com;10[[:space:]]+mail\e\e.example\e\e.com
+
+   # Modern record types use the same syntax
+   192.0.2.53 dns1.example # noconn dns=CAA:example.com;letsencrypt\e\e.org
+   192.0.2.53 dns1.example # noconn dns=HTTPS:example.com;alpn=
+
+   # Multiple content checks are separate dns= tags on one host
+   192.0.2.53 dns1.example # noconn dns=A:www.example.com;192\e\e.0\e\e.2\e\e.10 dns=MX:example.com;mail\e\e.example\e\e.com
+
+   # Disable cross-NS comparison when only this server's content matters
+   192.0.2.53 dns1.example # noconn dns=SOA:example.com;ns1\e\e.example\e\e.com dns-ns:off
+.fi
 
 Every "dns=" lookup that resolves against a zone apex also
 automatically performs a cross-nameserver consistency check:

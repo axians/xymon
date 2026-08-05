@@ -474,10 +474,13 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 	SBUF_DEFINE(tspec);
 	char *tst;
 	char *querysave = NULL;
+	char *contentpattern = NULL;
+	unsigned char *contentregexp = NULL;
 	dns_resp_t *responses = NULL;
 	dns_resp_t *walk = NULL;
 	int i;
 	int crossns_ok;
+	int content_ok;
 
 	dns_init();
 
@@ -501,6 +504,34 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 
 	tspec = strdup(hostname);
 	tspec_buflen = strlen(tspec) + 1;
+	{
+		char *separator = strchr(tspec, ';');
+		if (separator) {
+			*separator = '\0';
+			contentpattern = strdup(separator + 1);
+			if (!*contentpattern || strchr(tspec, ',')) {
+				clearstrbuffer(banner);
+				addtobuffer(banner, "DNS content match requires one lookup and a non-empty regular expression\n");
+				xfree(contentpattern);
+				xfree(tspec);
+				ares_destroy(channel);
+				return 1;
+			}
+			{
+				char escapeerror[128];
+				if (!dns_decode_content_pattern(contentpattern, &contentregexp,
+								escapeerror, sizeof(escapeerror))) {
+					clearstrbuffer(banner);
+					addtobuffer_many(banner, "DNS content match has an invalid escape sequence: ",
+							escapeerror, "\n", NULL);
+					xfree(contentpattern);
+					xfree(tspec);
+					ares_destroy(channel);
+					return 1;
+				}
+			}
+		}
+	}
 	getntimer(&starttime);
 	tst = strtok_r(tspec, ",", &querysave);
 	do {
@@ -528,9 +559,11 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 	tspent = tvdiff(&starttime, &endtime, NULL);
 	clearstrbuffer(banner); status = ARES_SUCCESS;
 	strncpy(tspec, hostname, tspec_buflen);
+	if (contentpattern) *strchr(tspec, ';') = '\0';
 	querysave = NULL;
 	tst = strtok_r(tspec, ",", &querysave);
 	crossns_ok = 1;
+	content_ok = 1;
 	for (walk = responses, i=1; (walk); walk = walk->next, i++) {
 		char *p, *tlookup;
 		int atype = T_A;
@@ -542,6 +575,23 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 		}
 		addtostrbuffer(banner, walk->msgbuf);
 		if (walk->msgstatus != ARES_SUCCESS) status = walk->msgstatus;
+		if (contentpattern) {
+			char matcherror[256];
+			int matchstatus = dns_response_matches(STRBUF(walk->msgbuf), (char *)contentregexp,
+							       matcherror, sizeof(matcherror));
+			if (matchstatus == 1) {
+				addtobuffer(banner, "\nContent match: matched\n");
+			}
+			else if (matchstatus == 0) {
+				addtobuffer(banner, "\nContent match: FAILED (pattern not found)\n");
+				content_ok = 0;
+			}
+			else {
+				addtobuffer_many(banner, "\nContent match: FAILED (invalid regular expression: ",
+						 matcherror, ")\n", NULL);
+				content_ok = 0;
+			}
+		}
 		xfree(walk->msgbuf);
 
 		/* Automatic cross-NS consistency check (issue #235). Re-derive
@@ -558,12 +608,14 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 
 		tst = strtok_r(NULL, ",", &querysave);
 	}
+	if (contentregexp) xfree(contentregexp);
+	if (contentpattern) xfree(contentpattern);
 	xfree(tspec);
 	snprintf(msg, sizeof(msg), "\nSeconds: %u.%.9ld\n", (unsigned int)tspent->tv_sec, tspent->tv_nsec);
 	addtobuffer(banner, msg);
 
 	ares_destroy(channel);
 
-	return ((status != ARES_SUCCESS) || !crossns_ok);
+	return ((status != ARES_SUCCESS) || !crossns_ok || !content_ok);
 }
 

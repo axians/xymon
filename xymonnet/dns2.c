@@ -43,6 +43,7 @@ static char rcsid[] = "$Id$";
 #include <string.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <regex.h>
 #include <netdb.h>
 
 #include "libxymon.h"
@@ -78,6 +79,68 @@ static char rcsid[] = "$Id$";
 #endif
 
 #include "dns2.h"
+
+int dns_decode_content_pattern(char *pattern, unsigned char **decoded, char *error, size_t errorlen)
+{
+	unsigned char *walk = (unsigned char *)pattern;
+	int decodedlen;
+
+	if (error && errorlen) error[0] = '\0';
+	while (*walk) {
+		if (*walk != '\\') {
+			walk++;
+			continue;
+		}
+
+		walk++;
+		if ((*walk == 'n') || (*walk == 'r') || (*walk == 't') || (*walk == '\\')) {
+			walk++;
+		}
+		else if (*walk == 'x') {
+			walk++;
+			if (!isxdigit((int)*walk)) {
+				if (error && errorlen) snprintf(error, errorlen, "invalid hex escape");
+				return 0;
+			}
+			walk++;
+			if (isxdigit((int)*walk)) walk++;
+		}
+		else {
+			if (error && errorlen) snprintf(error, errorlen, "unknown escape sequence");
+			return 0;
+		}
+	}
+
+	getescapestring(pattern, decoded, &decodedlen);
+	if (memchr(*decoded, '\0', decodedlen) != NULL) {
+		if (error && errorlen) snprintf(error, errorlen, "NUL escape is not valid in a regular expression");
+		xfree(*decoded);
+		*decoded = NULL;
+		return 0;
+	}
+	return 1;
+}
+
+int dns_response_matches(const char *response, const char *pattern, char *error, size_t errorlen)
+{
+	regex_t expression;
+	const char *recorddata;
+	int status;
+
+	if (error && errorlen) error[0] = '\0';
+	recorddata = strstr(response, "Answers:\n");
+	if (recorddata == NULL) return 0;
+	recorddata += strlen("Answers:\n");
+	status = regcomp(&expression, pattern, REG_EXTENDED | REG_NOSUB);
+	if (status != 0) {
+		if (error && errorlen) regerror(status, &expression, error, errorlen);
+		return -1;
+	}
+
+	status = regexec(&expression, recorddata, 0, NULL, 0);
+	regfree(&expression);
+	return (status == 0) ? 1 : 0;
+}
 
 /* Some systems (AIX, HP-UX) don't know the DNS T_SRV record */
 #ifndef T_SRV

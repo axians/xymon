@@ -85,4 +85,26 @@ assert_not_contains "db.example.com" "$out" \
 out=$("$XYMONGREP" --noextras --hosts="$work/hosts.cfg" 'http*')
 assert_not_contains "dialup" "$out" "--noextras must drop the dialup flag"
 
-pass "xymongrep tag selection contract holds (exact, prefix-*, echoed tags, dialup flag)"
+printf '0.0.0.0 dns-content.example # dns=TXT:_verify.example;verification=ready\n' \
+	>"$work/dns-content.cfg"
+out=$("$XYMONGREP" --hosts="$work/dns-content.cfg" 'dns*')
+assert_contains "dns-content.example # dns=TXT:_verify.example;verification=ready" "$out" \
+	"hosts.cfg parsing must preserve DNS content expressions"
+
+# A generated include with many monitored domains must remain one host per
+# domain and preserve each query tag. This is the intended configuration shape
+# for larger DNS portfolios; it also catches accidental parser limits or host
+# coalescing before xymonnet sees the tests.
+for n in $(seq 1 100); do
+	printf '0.0.0.0 domain%03d.example # noconn dns=A:domain%03d.example,AAAA:domain%03d.example\n' \
+		"$n" "$n" "$n"
+done >"$work/domains.cfg"
+out=$("$XYMONGREP" --hosts="$work/domains.cfg" 'dns*')
+[ "$(printf '%s\n' "$out" | grep -c '^0\.0\.0\.0 domain[0-9][0-9][0-9]\.example # dns=')" -eq 100 ] \
+	|| fail "100-domain DNS configuration must yield exactly 100 monitored hosts"
+assert_contains "domain001.example # dns=A:domain001.example,AAAA:domain001.example" "$out" \
+	"first generated domain lost its DNS queries"
+assert_contains "domain100.example # dns=A:domain100.example,AAAA:domain100.example" "$out" \
+	"last generated domain lost its DNS queries"
+
+pass "xymongrep tag selection and 100-domain DNS configuration contracts hold"

@@ -23,6 +23,11 @@ DNS tests using cross-nameserver consistency checking now record and graph the
 response time from each authoritative nameserver. The existing aggregate DNS
 response-time graph remains available.
 
+DNS tests can now require response content with
+"dns=TYPE:lookup;expected_data_regexp". Missing content or an invalid regular
+expression fails the test. Multiple "dns=" tags on one host are combined into
+one DNS status that fails if any of the configured checks fail.
+
 
 Changes for 4.3.30
 ==================

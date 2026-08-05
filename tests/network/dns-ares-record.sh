@@ -75,6 +75,39 @@ grep -q 'dns_render_arespec(abuf, alen, response);' <<<"$callback_body" \
 grep -q 'dns_render_legacy(abuf, alen, response);' <<<"$callback_body" \
 	|| fail "dns_detail_callback() no longer calls dns_render_legacy() -- legacy fallback unreachable"
 
+dns=$(cat "$ROOT/xymonnet/dns.c")
+assert_contains 'strtok_r(tspec, ",", &querysave)' "$dns" \
+	"comma-separated DNS queries must use independent tokenizer state"
+assert_contains 'strtok_r(statcopy, ",", &saveptr)' "$dns" \
+	"static dns-ns lists must not corrupt DNS query tokenizer state"
+assert_contains 'NS response time: %s %d:%s' "$dns" \
+	"per-NS timing records must retain query identity for multi-query hosts"
+assert_contains "strchr(tspec, ';')" "$dns" \
+	"dns= content expressions must be separated from the lookup before querying"
+assert_contains 'dns_decode_content_pattern(contentpattern, &contentregexp' "$dns" \
+	"DNS content expressions must validate and decode Xymon escapes"
+assert_contains 'dns_response_matches(STRBUF(walk->msgbuf), (char *)contentregexp' "$dns" \
+	"DNS content matching must inspect the response without consuming its string buffer"
+assert_contains '!crossns_ok || !content_ok' "$dns" \
+	"a DNS content mismatch must fail the DNS test"
+
+xymonnet=$(cat "$ROOT/xymonnet/xymonnet.c")
+nslookup_body=$(awk '/^void run_nslookup_service\(/{c=1} c{print} c&&/^}/{exit}' "$ROOT/xymonnet/xymonnet.c")
+assert_contains 'int expected_open = (walk->reverse ? !walk->open : walk->open)' "$nslookup_body" \
+	"multiple dns= tags must aggregate each lookup according to its own reverse expectation"
+assert_contains 'aggregate_open = 0' "$nslookup_body" \
+	"multiple dns= tags on one host must fail their aggregate status when any expected result fails"
+assert_contains 'if (!walk->dialup) failed_tests_are_dialup = 0' "$nslookup_body" \
+	"a dialup DNS failure must not hide a non-dialup failure in the aggregate status"
+assert_contains 'if (walk->alwaystrue) failed_test_ignores_ping = 1' "$nslookup_body" \
+	"an always-true DNS failure must remain visible when aggregate results are reported"
+assert_contains 'addtobufferraw(combined, STRBUF(walk->banner)' "$nslookup_body" \
+	"multiple dns= tags on one host must retain every lookup banner without duplicate timing lines"
+assert_contains 'total_seconds += seconds' "$nslookup_body" \
+	"multiple dns= tags must sum their response times into one aggregate timing value"
+assert_contains 'walk->internal = 1' "$nslookup_body" \
+	"multiple dns= tags on one host must emit only one aggregate DNS status"
+
 # The structured renderer must still cover the record types the legacy parser
 # handled (A, AAAA, CNAME, NS, PTR, HINFO, MX, SOA, TXT, SRV) -- losing a case
 # silently degrades that type to "[Unknown RR; cannot parse]" instead of being
