@@ -282,7 +282,187 @@ char *dnsresolve(char *hostname)
 	return result;
 }
 
-int dns_test_server(char *serverip, char *hostname, strbuffer_t *banner)
+/*
+ * Cross-NS consistency check (issue #235). Captures the raw response
+ * buffer from a single ares_search() call, for feeding to
+ * dns_extract_ns_names()/dns_crossns_evaluate() (dns2.c) -- this file
+ * never needs to touch ares_dns_record_t directly, keeping that (and the
+ * ARES_VERSION gate that guards it) entirely inside dns2.c.
+ */
+typedef struct dns_crossns_capture_t {
+	int status;
+	unsigned char *abuf;
+	int alen;
+} dns_crossns_capture_t;
+
+static void dns_crossns_capture_callback(void *arg, int status, int timeouts, unsigned char *abuf, int alen)
+{
+	dns_crossns_capture_t *cap = (dns_crossns_capture_t *)arg;
+
+	(void)timeouts;
+	cap->status = status;
+	if ((status == ARES_SUCCESS) && abuf && (alen > 0)) {
+		cap->abuf = (unsigned char *)malloc((size_t)alen);
+		if (cap->abuf) {
+			memcpy(cap->abuf, abuf, (size_t)alen);
+			cap->alen = alen;
+		}
+	}
+}
+
+/*
+ * Query a single nameserver IP for atype:tlookup and return the raw
+ * response buffer (caller frees), or NULL on any failure. Used both for
+ * the initial "what are this zone's NS records" discovery query and for
+ * re-querying the same atype:tlookup against each discovered NS.
+ */
+static unsigned char *dns_crossns_query_one(const char *ip, char *tlookup, int atype, int *alen_out, struct timespec *elapsed_out)
+{
+	ares_channel nschannel;
+	struct ares_options options;
+	struct in_addr addr;
+	dns_crossns_capture_t cap;
+	struct timespec starttime, endtime;
+
+	*alen_out = 0;
+	if (elapsed_out) memset(elapsed_out, 0, sizeof(*elapsed_out));
+	if (inet_aton(ip, &addr) == 0) return NULL;
+
+	options.flags = ARES_FLAG_NOCHECKRESP;
+	options.servers = &addr;
+	options.nservers = 1;
+	options.timeout = 2000;
+	options.tries = 2;
+	if (ares_init_options(&nschannel, &options, (ARES_OPT_FLAGS | ARES_OPT_SERVERS | ARES_OPT_TIMEOUTMS | ARES_OPT_TRIES)) != ARES_SUCCESS) {
+		return NULL;
+	}
+
+	memset(&cap, 0, sizeof(cap));
+	getntimer(&starttime);
+	ares_search(nschannel, tlookup, C_IN, atype, dns_crossns_capture_callback, &cap);
+	dns_ares_queue_run(nschannel);
+	getntimer(&endtime);
+	if (elapsed_out) tvdiff(&starttime, &endtime, elapsed_out);
+	ares_destroy(nschannel);
+
+	*alen_out = cap.alen;
+	return cap.abuf;
+}
+
+/*
+ * Automatic cross-NS consistency check for one dns= sub-test: discover the
+ * zone's authoritative nameservers (queried against 'serverip', which is
+ * presumed authoritative or at least able to answer for its own zone),
+ * resolve each via the normal system resolver, re-query atype:tlookup
+ * against every one of them, and evaluate agreement (dns2.c). Silently a
+ * no-op (returns true) if NS discovery finds nothing usable (e.g. tlookup
+ * isn't a zone apex, or the responding side is old c-ares) -- this keeps
+ * ordinary non-zone-apex dns= tests (e.g. "dns=mx:host.example.com")
+ * behaving exactly as before. Appends a summary to 'banner' when a
+ * cross-NS check was actually performed.
+ *
+ * 'staticns' is the raw value of the "dns-ns:" hosts.cfg tag (NULL if not
+ * set): NULL means automatic NS discovery (the default); "off" or "none"
+ * (case-insensitive) disables cross-NS checking for this host entirely
+ * (e.g. for zones like google.com whose NS clusters are independently
+ * managed by design, not via replication, so "consistency" doesn't apply);
+ * anything else is treated as a comma-separated list of NS hostnames/IPs to
+ * use INSTEAD of dynamic discovery.
+ */
+static int dns_crossns_check(char *serverip, char *tlookup, int atype, char *staticns, strbuffer_t *banner)
+{
+	unsigned char *ns_abuf;
+	int ns_alen = 0;
+	char **ns_names;
+	int i, ns_count, consistent;
+	unsigned char **abufs;
+	int *alens;
+	char **labels;
+	struct timespec *timings;
+
+	if (staticns && (strcasecmp(staticns, "off") == 0 || strcasecmp(staticns, "none") == 0)) {
+		return 1; /* cross-NS checking explicitly disabled for this host */
+	}
+
+	if (staticns) {
+		/* Static override: use exactly the admin-declared NS list instead of
+		 * dynamic NS-record discovery (e.g. for zones with independently
+		 * managed NS clusters, where discovery would find the same list
+		 * anyway but the point is to skip auto-discovery's assumptions). */
+		char *statcopy = strdup(staticns);
+		char *tok;
+		char *saveptr = NULL;
+
+		ns_count = 0;
+		for (tok = strtok_r(statcopy, ",", &saveptr); tok; tok = strtok_r(NULL, ",", &saveptr)) ns_count++;
+		xfree(statcopy);
+
+		ns_names = (char **)calloc((size_t)ns_count + 1, sizeof(char *));
+		statcopy = strdup(staticns);
+		saveptr = NULL;
+		i = 0;
+		for (tok = strtok_r(statcopy, ",", &saveptr); tok; tok = strtok_r(NULL, ",", &saveptr)) ns_names[i++] = strdup(tok);
+		ns_names[ns_count] = NULL;
+		xfree(statcopy);
+	}
+	else {
+		ns_abuf = dns_crossns_query_one(serverip, tlookup, T_NS, &ns_alen, NULL);
+		if (!ns_abuf) return 1;
+
+		ns_names = dns_extract_ns_names(ns_abuf, ns_alen);
+		xfree(ns_abuf);
+		if (!ns_names) return 1; /* not a zone apex, or c-ares too old to check */
+
+		for (ns_count = 0; ns_names[ns_count]; ns_count++) ;
+	}
+
+	if (ns_count < 2) {
+		/* Nothing meaningful to cross-check with 0 or 1 NS record. */
+		for (i = 0; i < ns_count; i++) xfree(ns_names[i]);
+		xfree(ns_names);
+		return 1;
+	}
+
+	/* Resolve every NS hostname via the normal system resolver. */
+	for (i = 0; i < ns_count; i++) add_host_to_dns_queue(ns_names[i]);
+
+	abufs = (unsigned char **)calloc((size_t)ns_count, sizeof(unsigned char *));
+	alens = (int *)calloc((size_t)ns_count, sizeof(int));
+	labels = (char **)calloc((size_t)ns_count, sizeof(char *));
+	timings = (struct timespec *)calloc((size_t)ns_count, sizeof(struct timespec));
+
+	for (i = 0; i < ns_count; i++) {
+		char *ip = dnsresolve(ns_names[i]);
+
+		labels[i] = strdup(ns_names[i]);
+		if (ip) abufs[i] = dns_crossns_query_one(ip, tlookup, atype, &alens[i], &timings[i]);
+		if (abufs[i]) {
+			char msg[512];
+
+			snprintf(msg, sizeof(msg), "NS response time: %s %d:%s %u.%.9ld\n",
+				 labels[i], atype, tlookup,
+				 (unsigned int)timings[i].tv_sec, timings[i].tv_nsec);
+			addtobuffer(banner, msg);
+		}
+	}
+
+	consistent = dns_crossns_evaluate(atype, abufs, alens, (const char **)labels, ns_count, banner);
+
+	for (i = 0; i < ns_count; i++) {
+		xfree(ns_names[i]);
+		xfree(labels[i]);
+		xfree(abufs[i]);
+	}
+	xfree(ns_names);
+	xfree(abufs);
+	xfree(alens);
+	xfree(labels);
+	xfree(timings);
+
+	return consistent;
+}
+
+int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *banner)
 {
 	ares_channel channel;
 	struct ares_options options;
@@ -293,9 +473,14 @@ int dns_test_server(char *serverip, char *hostname, strbuffer_t *banner)
 	char msg[100];
 	SBUF_DEFINE(tspec);
 	char *tst;
+	char *querysave = NULL;
+	char *contentpattern = NULL;
+	unsigned char *contentregexp = NULL;
 	dns_resp_t *responses = NULL;
 	dns_resp_t *walk = NULL;
 	int i;
+	int crossns_ok;
+	int content_ok;
 
 	dns_init();
 
@@ -319,8 +504,36 @@ int dns_test_server(char *serverip, char *hostname, strbuffer_t *banner)
 
 	tspec = strdup(hostname);
 	tspec_buflen = strlen(tspec) + 1;
+	{
+		char *separator = strchr(tspec, ';');
+		if (separator) {
+			*separator = '\0';
+			contentpattern = strdup(separator + 1);
+			if (!*contentpattern || strchr(tspec, ',')) {
+				clearstrbuffer(banner);
+				addtobuffer(banner, "DNS content match requires one lookup and a non-empty regular expression\n");
+				xfree(contentpattern);
+				xfree(tspec);
+				ares_destroy(channel);
+				return 1;
+			}
+			{
+				char escapeerror[128];
+				if (!dns_decode_content_pattern(contentpattern, &contentregexp,
+								escapeerror, sizeof(escapeerror))) {
+					clearstrbuffer(banner);
+					addtobuffer_many(banner, "DNS content match has an invalid escape sequence: ",
+							escapeerror, "\n", NULL);
+					xfree(contentpattern);
+					xfree(tspec);
+					ares_destroy(channel);
+					return 1;
+				}
+			}
+		}
+	}
 	getntimer(&starttime);
-	tst = strtok(tspec, ",");
+	tst = strtok_r(tspec, ",", &querysave);
 	do {
 		dns_resp_t *newtest = (dns_resp_t *)malloc(sizeof(dns_resp_t));
 		char *p, *tlookup;
@@ -337,7 +550,7 @@ int dns_test_server(char *serverip, char *hostname, strbuffer_t *banner)
 
 		dbgprintf("ares_search: tlookup='%s', class=%d, type=%d\n", tlookup, C_IN, atype);
 		ares_search(channel, tlookup, C_IN, atype, dns_detail_callback, newtest);
-		tst = strtok(NULL, ",");
+		tst = strtok_r(NULL, ",", &querysave);
 	} while (tst);
 
 	dns_ares_queue_run(channel);
@@ -346,8 +559,15 @@ int dns_test_server(char *serverip, char *hostname, strbuffer_t *banner)
 	tspent = tvdiff(&starttime, &endtime, NULL);
 	clearstrbuffer(banner); status = ARES_SUCCESS;
 	strncpy(tspec, hostname, tspec_buflen);
-	tst = strtok(tspec, ",");
+	if (contentpattern) *strchr(tspec, ';') = '\0';
+	querysave = NULL;
+	tst = strtok_r(tspec, ",", &querysave);
+	crossns_ok = 1;
+	content_ok = 1;
 	for (walk = responses, i=1; (walk); walk = walk->next, i++) {
+		char *p, *tlookup;
+		int atype = T_A;
+
 		/* Print an identifying line if more than one query */
 		if ((walk != responses) || (walk->next)) {
 			snprintf(msg, sizeof(msg), "\n*** DNS lookup of '%s' ***\n", tst);
@@ -355,15 +575,47 @@ int dns_test_server(char *serverip, char *hostname, strbuffer_t *banner)
 		}
 		addtostrbuffer(banner, walk->msgbuf);
 		if (walk->msgstatus != ARES_SUCCESS) status = walk->msgstatus;
+		if (contentpattern) {
+			char matcherror[256];
+			int matchstatus = dns_response_matches(STRBUF(walk->msgbuf), (char *)contentregexp,
+							       matcherror, sizeof(matcherror));
+			if (matchstatus == 1) {
+				addtobuffer(banner, "\nContent match: matched\n");
+			}
+			else if (matchstatus == 0) {
+				addtobuffer(banner, "\nContent match: FAILED (pattern not found)\n");
+				content_ok = 0;
+			}
+			else {
+				addtobuffer_many(banner, "\nContent match: FAILED (invalid regular expression: ",
+						 matcherror, ")\n", NULL);
+				content_ok = 0;
+			}
+		}
 		xfree(walk->msgbuf);
-		tst = strtok(NULL, ",");
+
+		/* Automatic cross-NS consistency check (issue #235). Re-derive
+		 * tlookup/atype from this sub-test's spec the same way the query
+		 * loop above did. Only meaningful when the initial query itself
+		 * succeeded -- no point cross-checking a lookup that already
+		 * failed against its own target server. */
+		p = strchr(tst, ':');
+		tlookup = (p ? p+1 : tst);
+		if (p) { *p = '\0'; atype = dns_name_type(tst); *p = ':'; }
+		if (walk->msgstatus == ARES_SUCCESS) {
+			if (!dns_crossns_check(serverip, tlookup, atype, crossns, banner)) crossns_ok = 0;
+		}
+
+		tst = strtok_r(NULL, ",", &querysave);
 	}
+	if (contentregexp) xfree(contentregexp);
+	if (contentpattern) xfree(contentpattern);
 	xfree(tspec);
 	snprintf(msg, sizeof(msg), "\nSeconds: %u.%.9ld\n", (unsigned int)tspent->tv_sec, tspent->tv_nsec);
 	addtobuffer(banner, msg);
 
 	ares_destroy(channel);
 
-	return (status != ARES_SUCCESS);
+	return ((status != ARES_SUCCESS) || !crossns_ok || !content_ok);
 }
 

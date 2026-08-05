@@ -446,6 +446,9 @@ void load_tests(void)
 			if (p) h->routerdeps = p + strlen(routestring);
 		}
 
+		p = xmh_custom_item(hwalk, "dns-ns:");
+		if (p) h->crossns = p + strlen("dns-ns:");
+
 		if (xmh_item(hwalk, XMH_FLAG_NOCONN)) h->noconn = 1;
 		if (xmh_item(hwalk, XMH_FLAG_NOPING)) h->noping = 1;
 		if (xmh_item(hwalk, XMH_FLAG_TRACE)) h->dotrace = 1;
@@ -1062,7 +1065,65 @@ void run_nslookup_service(service_t *service)
 				lookup = t->host->hostname;
 			}
 
-			t->open = (dns_test_server(ip_to_test(t->host), lookup, t->banner) == 0);
+			t->open = (dns_test_server(ip_to_test(t->host), lookup, t->host->crossns, t->banner) == 0);
+		}
+	}
+
+	for (t=service->items; (t); t = t->next) {
+		testitem_t *walk;
+		int testcount = 0;
+
+		if (t->internal) continue;
+		for (walk=t; (walk); walk = walk->next) {
+			if (!walk->internal && (walk->host == t->host)) testcount++;
+		}
+
+		if (testcount > 1) {
+			strbuffer_t *combined = newstrbuffer(0);
+			double total_seconds = 0.0;
+			int aggregate_open = 1;
+			int failed_tests_are_dialup = 1;
+			int failed_test_ignores_ping = 0;
+
+			for (walk=t; (walk); walk = walk->next) {
+				if (!walk->internal && (walk->host == t->host)) {
+					char *secondsline = strstr(STRBUF(walk->banner), "\nSeconds:");
+					double seconds;
+					int expected_open = (walk->reverse ? !walk->open : walk->open);
+
+					addtobuffer_many(combined, "\n*** ", (walk->reverse ? "!" : ""),
+							walk->testspec, " ***\n", NULL);
+					if (secondsline && (sscanf(secondsline+1, "Seconds: %lf", &seconds) == 1)) {
+						addtobufferraw(combined, STRBUF(walk->banner),
+							       (int)(secondsline - STRBUF(walk->banner)));
+						total_seconds += seconds;
+					}
+					else {
+						addtostrbuffer(combined, walk->banner);
+					}
+
+					if (!expected_open) {
+						aggregate_open = 0;
+						if (!walk->dialup) failed_tests_are_dialup = 0;
+						if (walk->alwaystrue) failed_test_ignores_ping = 1;
+					}
+					if (walk != t) {
+						walk->internal = 1;
+					}
+				}
+			}
+
+			{
+				char timemsg[100];
+				snprintf(timemsg, sizeof(timemsg), "\nSeconds: %.9f\n", total_seconds);
+				addtobuffer(combined, timemsg);
+			}
+			freestrbuffer(t->banner);
+			t->banner = combined;
+			t->open = aggregate_open;
+			t->reverse = 0;
+			t->dialup = (!aggregate_open && failed_tests_are_dialup);
+			t->alwaystrue = (!aggregate_open && failed_test_ignores_ping);
 		}
 	}
 }

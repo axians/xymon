@@ -273,9 +273,10 @@
 
 [tcp]
 	# TCP tests - include all, except the HTTP tests as they tend to have
-	# much longer response times than the normal tcp tests.
+	# much longer response times than the normal tcp tests, and per-NS DNS
+	# timings which have their own graph below.
 	FNPATTERN ^tcp.(.+).rrd
-	EXFNPATTERN ^tcp.http.(.+).rrd
+	EXFNPATTERN ^tcp\.(http|dns)\.(.+)\.rrd
 	TITLE TCP Connection Times
 	YAXIS Seconds
 	DEF:p@RRDIDX@=@RRDFN@:sec:AVERAGE
@@ -284,6 +285,17 @@
 	GPRINT:p@RRDIDX@:MAX: \: %5.1lf%s (max)
 	GPRINT:p@RRDIDX@:MIN: \: %5.1lf%s (min)
 	GPRINT:p@RRDIDX@:AVERAGE: \: %5.1lf%s (avg)\n
+
+[dns-ns]
+	FNPATTERN ^tcp\.dns\.(.+)\.rrd
+	TITLE DNS Response Times by Nameserver and Query
+	YAXIS Seconds
+	DEF:p@RRDIDX@=@RRDFN@:sec:AVERAGE
+	LINE2:p@RRDIDX@#@COLOR@:@RRDPARAM@
+	GPRINT:p@RRDIDX@:LAST: \: %5.3lf%s (cur)
+	GPRINT:p@RRDIDX@:MAX: \: %5.3lf%s (max)
+	GPRINT:p@RRDIDX@:MIN: \: %5.3lf%s (min)
+	GPRINT:p@RRDIDX@:AVERAGE: \: %5.3lf%s (avg)\n
 
 [http]
 	FNPATTERN ^tcp.http.(.+).rrd
