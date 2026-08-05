@@ -117,6 +117,41 @@ def serve_ftps(listener, context):
             connection.close()
 
 
+def encode_dns_name(name):
+    return b"".join(
+        bytes([len(label)]) + label.encode("ascii")
+        for label in name.rstrip(".").split(".")
+    ) + b"\x00"
+
+
+DNS_ANSWERS = {
+    (1, "fixture.xymon.test"): socket.inet_aton("127.0.0.1"),
+    (2, "ns.fixture.xymon.test"): encode_dns_name("ns1.fixture.xymon.test"),
+    (5, "alias.fixture.xymon.test"): encode_dns_name(
+        "canonical.fixture.xymon.test"
+    ),
+    (6, "soa.fixture.xymon.test"): (
+        encode_dns_name("ns1.fixture.xymon.test")
+        + encode_dns_name("hostmaster.fixture.xymon.test")
+        + struct.pack("!IIIII", 2026080501, 3600, 600, 86400, 60)
+    ),
+    (12, "1.0.0.127.in-addr.arpa"): encode_dns_name(
+        "ptr-target.fixture.xymon.test"
+    ),
+    (15, "mx.fixture.xymon.test"): (
+        struct.pack("!H", 10) + encode_dns_name("mail.fixture.xymon.test")
+    ),
+    (16, "txt.fixture.xymon.test"): b"\x12verification=ready",
+    (28, "aaaa.fixture.xymon.test"): socket.inet_pton(
+        socket.AF_INET6, "2001:db8::1"
+    ),
+    (33, "_service._tcp.fixture.xymon.test"): (
+        struct.pack("!HHH", 10, 20, 443)
+        + encode_dns_name("service.fixture.xymon.test")
+    ),
+}
+
+
 def serve_dns(dns_socket):
     while True:
         request, client = dns_socket.recvfrom(4096)
@@ -136,9 +171,8 @@ def serve_dns(dns_socket):
             query_name = ".".join(labels)
             query_flags = struct.unpack("!H", request[2:4])[0]
             response_flags = 0x8400 | (query_flags & 0x0100)
-            answer_count = int(
-                query_type == 1 and query_name == "fixture.xymon.test"
-            )
+            answer = DNS_ANSWERS.get((query_type, query_name))
+            answer_count = int(answer is not None)
             if answer_count == 0:
                 response_flags |= 3
             response = struct.pack(
@@ -153,8 +187,8 @@ def serve_dns(dns_socket):
             if answer_count:
                 response += (
                     b"\xc0\x0c"
-                    + struct.pack("!HHIH", 1, 1, 60, 4)
-                    + socket.inet_aton("127.0.0.1")
+                    + struct.pack("!HHIH", query_type, 1, 60, len(answer))
+                    + answer
                 )
             dns_socket.sendto(response, client)
         except (IndexError, UnicodeDecodeError, struct.error):

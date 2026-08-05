@@ -19,6 +19,10 @@ assert_file_exists "$fixture"
 assert_file_exists "$protocols"
 ssl_dialect_ready=0
 grep -Fq 'resolve_ssl_dialect_service' "$root/xymonnet/xymonnet.c" && ssl_dialect_ready=1
+dns_aggregate_ready=0
+grep -Fq 'aggregate_open' "$root/xymonnet/xymonnet.c" && dns_aggregate_ready=1
+dns_extra_ready=0
+grep -Fq 'dns_decode_content_pattern' "$root/xymonnet/dns.c" && dns_extra_ready=1
 
 work=$(mktempdir)
 mkdir -p "$work/runtime/etc" "$work/runtime/tmp" "$work/runtime/data" \
@@ -149,6 +153,17 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 	printf '127.0.0.1 pingreverse.test # !conn\n'
 	if [[ $ntp_ready = 1 ]]; then
 		printf '192.0.2.1 ntpfail.test # noconn ntp\n'
+	fi
+	if [[ $dns_ready = 1 && $dns_extra_ready = 1 ]]; then
+		printf '127.0.0.1 dnscontentok.test # noconn dns=A:fixture.xymon.test;127[.]0[.]0[.]1\n'
+		printf '127.0.0.1 dnscontentfail.test # noconn dns=A:fixture.xymon.test;192[.]0[.]2[.]1\n'
+		printf '%s' '127.0.0.1 dnsrecordtypes.test # noconn'
+		printf '%s' ' dns=A:fixture.xymon.test,AAAA:aaaa.fixture.xymon.test'
+		printf '%s' ',CNAME:alias.fixture.xymon.test,MX:mx.fixture.xymon.test'
+		printf '%s' ',NS:ns.fixture.xymon.test,PTR:1.0.0.127.in-addr.arpa'
+		printf '%s' ',SOA:soa.fixture.xymon.test,SRV:_service._tcp.fixture.xymon.test'
+		printf '%s\n' ',TXT:txt.fixture.xymon.test'
+		printf '127.0.0.1 dnsrecordfail.test # noconn dns=AAAA:missing.fixture.xymon.test\n'
 	fi
 	if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		printf '127.0.0.1 ldapfail.test # noconn'
@@ -338,18 +353,76 @@ if [[ $ntp_ready = 1 ]]; then
 fi
 
 if [[ $dns_ready = 1 ]]; then
-	[[ $(grep -Fc 'system,test.dns green' "$work/xymonnet.out") = 2 ]] || {
-		cat "$work/xymonnet.out" >&2
-		cat "$work/xymonnet.err" >&2
-		fail "expected successful dns and dig reports"
-	}
-	[[ $(grep -Fc 'system,test.dns red' "$work/xymonnet.out") = 2 ]] || {
-		cat "$work/xymonnet.out" >&2
-		cat "$work/xymonnet.err" >&2
-		fail "expected failed dns and dig reports"
-	}
+	if [[ $dns_aggregate_ready = 1 ]]; then
+		[[ $(grep -Fc 'system,test.dns green' "$work/xymonnet.out") = 0 ]] || {
+			cat "$work/xymonnet.out" >&2
+			fail "expected no green status when an aggregated DNS lookup fails"
+		}
+		[[ $(grep -Fc 'system,test.dns red' "$work/xymonnet.out") = 1 ]] || {
+			cat "$work/xymonnet.out" >&2
+			fail "expected one worst-result aggregate DNS status"
+		}
+	else
+		[[ $(grep -Fc 'system,test.dns green' "$work/xymonnet.out") = 2 ]] || {
+			cat "$work/xymonnet.out" >&2
+			cat "$work/xymonnet.err" >&2
+			fail "expected successful dns and dig reports"
+		}
+		[[ $(grep -Fc 'system,test.dns red' "$work/xymonnet.out") = 2 ]] || {
+			cat "$work/xymonnet.out" >&2
+			cat "$work/xymonnet.err" >&2
+			fail "expected failed dns and dig reports"
+		}
+	fi
 	grep -Fq 'fixture.xymon.test' "$work/xymonnet.out" || fail "DNS answer is missing"
 	grep -Fq 'Name not found' "$work/xymonnet.out" || fail "DNS failure is missing"
+	if [[ $dns_aggregate_ready = 1 ]]; then
+		for dns_testspec in \
+			'*** dns=A:fixture.xymon.test ***' \
+			'*** dig=A:fixture.xymon.test ***' \
+			'*** dns=A:missing.xymon.test ***' \
+			'*** dig=A:missing.xymon.test ***'
+		do
+			[[ $(grep -Fc -- "$dns_testspec" "$work/xymonnet.out") = 1 ]] || {
+				cat "$work/xymonnet.out" >&2
+				fail "aggregate DNS report did not retain one subtest: $dns_testspec"
+			}
+		done
+	fi
+	if [[ $dns_extra_ready = 1 ]]; then
+		grep -Fq 'dnscontentok,test.dns green' "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			fail "matching DNS response content did not pass"
+		}
+		grep -Fq 'dnscontentfail,test.dns red' "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			fail "mismatching DNS response content did not fail"
+		}
+		grep -Fq 'dnsrecordtypes,test.dns green' "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			fail "one or more supported DNS record types did not pass"
+		}
+		grep -Fq 'dnsrecordfail,test.dns red' "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			fail "missing DNS record did not fail"
+		}
+		for dns_answer in \
+			'127.0.0.1' \
+			'2001:db8::1' \
+			'canonical.fixture.xymon.test' \
+			'mail.fixture.xymon.test' \
+			'ns1.fixture.xymon.test' \
+			'ptr-target.fixture.xymon.test' \
+			'hostmaster.fixture.xymon.test' \
+			'service.fixture.xymon.test' \
+			'verification=ready'
+		do
+			grep -Fq "$dns_answer" "$work/xymonnet.out" || {
+				cat "$work/xymonnet.out" >&2
+				fail "DNS record-type answer is missing: $dns_answer"
+			}
+		done
+	fi
 fi
 
 if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
