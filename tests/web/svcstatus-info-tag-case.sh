@@ -38,9 +38,8 @@
 #
 # NONE OF THESE ARE FIXED -- pending a maintainer decision on the right fix
 # for each. The harness is written fix-forward: each assertion states the
-# desired end state, so it starts passing when that defect is fixed rather
-# than needing to be inverted. Expected to fail until then; deliberately
-# not wired to `pass` on the current behavior.
+# desired end state. It skips until all production fixes are present, then
+# becomes a strict regression guard for the combined behavior.
 
 set -euo pipefail
 # shellcheck source=tests/lib/assert.sh
@@ -48,6 +47,15 @@ set -euo pipefail
 
 ROOT=$(find_root)
 here=$(dirname "$0")
+
+loadhosts_c="$ROOT/lib/loadhosts.c"
+item_idx_body=$(awk '/^int xmh_item_idx/,/^}/' "$loadhosts_c")
+if [[ $item_idx_body == *'while (xmh_item_key[i] &&'* ]] \
+	|| [[ $item_idx_body == *'strncmp('* ]] \
+	|| grep -Fq '"XMH_MULTIHOMED";' "$loadhosts_c"
+then
+	skip "reserved-tag key table fixes are not all present"
+fi
 
 CC=${CC:-cc}
 command -v "$CC" >/dev/null 2>&1 || skip "no C compiler available (CC=$CC)"

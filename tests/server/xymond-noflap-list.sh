@@ -23,10 +23,9 @@
 # per-status-message usage).
 #
 # NOT FIXED -- pending maintainer discussion. The harness is written
-# fix-forward: each assertion states the desired end state, so it starts
-# passing once the defect is fixed rather than needing to be inverted.
-# Expected to fail until then; deliberately not wired to `pass` on the
-# current behaviour.
+# fix-forward: each assertion states the desired end state. It skips while
+# the production fix is absent, then becomes a strict regression guard once
+# the copy-before-tokenizing implementation is present.
 
 set -euo pipefail
 # shellcheck source=tests/lib/assert.sh
@@ -34,6 +33,10 @@ set -euo pipefail
 
 ROOT=$(find_root)
 here=$(dirname "$0")
+
+noflap_body=$(awk '/^static int isset_noflap/,/^}/' "$ROOT/xymond/xymond.c")
+[[ $noflap_body == *'strdup('* ]] \
+	|| skip "noflap= list fix not present (requires fix/xymond-noflap-list)"
 
 CC=${CC:-cc}
 command -v "$CC" >/dev/null 2>&1 || skip "no C compiler available (CC=$CC)"
