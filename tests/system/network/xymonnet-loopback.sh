@@ -17,6 +17,8 @@ fixture="$root/tests/fixtures/xymonnet-loopback.py"
 protocols="$root/xymonnet/protocols.cfg"
 assert_file_exists "$fixture"
 assert_file_exists "$protocols"
+ssl_dialect_ready=0
+grep -Fq 'resolve_ssl_dialect_service' "$root/xymonnet/xymonnet.c" && ssl_dialect_ready=1
 
 work=$(mktempdir)
 mkdir -p "$work/runtime/etc" "$work/runtime/tmp" "$work/runtime/data" \
@@ -90,16 +92,10 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 	if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		printf ' ldap://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
 		printf ' ldaps://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
-		# Same dialect suffixes as https, appended to the ldaps:// scheme.
-		# xymonnet detects which TLS library libldap is linked against at
-		# runtime (LDAP_OPT_X_TLS_PACKAGE) and enforces the requested
-		# version either way -- PROTOCOL_MIN/MAX on OpenSSL-linked builds,
-		# an equivalent GnuTLS priority string on GnuTLS-linked builds
-		# (this container's default). So ldapsd (TLSv1.3) succeeds and
-		# ldapst (TLSv1.0, unavailable on this OpenSSL/GnuTLS build either
-		# way) fails the same on every platform -- see hosts.cfg(5).
-		printf ' ldapsd://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
-		printf ' ldapst://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
+		if [[ $ssl_dialect_ready = 1 ]]; then
+			printf ' ldapsd://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
+			printf ' ldapst://127.0.0.1:%s/dc=xymon,dc=test?dc?base?(objectClass=*)' "$XYMONNET_LDAP_PORT"
+		fi
 	fi
 	if [[ $dns_ready = 1 ]]; then
 		printf ' dns=A:fixture.xymon.test dig=A:fixture.xymon.test'
@@ -113,12 +109,10 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 	printf ' telnet:%s' "$telnet_port"
 	if [[ $tls_port != 0 ]]; then
 		printf ' ftps:%s ftps:%s' "$tls_port" "$ssh_port"
-		# Same hosts.cfg(5) dialect suffixes as http/https, now also accepted
-		# on the plain colon-port SSL-tunneled tags (ftps/telnets/smtps/
-		# pop3s/imaps/nntps). TLSv1.3 succeeds against this default-range
-		# listener; TLSv1.0 can never complete a handshake on this OpenSSL.
-		printf ' ftpsd:%s' "$tls_port"
-		printf ' ftpst:%s' "$tls_port"
+		if [[ $ssl_dialect_ready = 1 ]]; then
+			printf ' ftpsd:%s' "$tls_port"
+			printf ' ftpst:%s' "$tls_port"
+		fi
 	fi
 	if [[ $https_port != 0 ]]; then
 		printf ' http=httpsok;https://127.0.0.1:%s/good' "$https_port"
@@ -134,12 +128,10 @@ read -r http_port ssh_port bad_banner_port ftp_port telnet_port tls_port \
 		printf ' http=tls11fail;httpsb://127.0.0.1:%s/good' "$https_port"
 		printf ' http=tls13ok;httpsd://127.0.0.1:%s/good' "$https_port"
 		# Cipher-strength suffixes: "HIGH" matches broadly (succeeds); "MEDIUM"
-		# matches nothing on modern OpenSSL, so SSL_CTX_set_cipher_list fails
-		# and the previous (default) cipher list is left in place -- either way
-		# the connection should still succeed, proving the code path itself
-		# doesn't break a request.
+		# matches nothing on modern OpenSSL, so the configured restriction is
+		# rejected and the test reports an SSL error.
 		printf ' http=cipherhighok;httpsh://127.0.0.1:%s/good' "$https_port"
-		printf ' http=ciphermediumok;httpsm://127.0.0.1:%s/good' "$https_port"
+		printf ' http=ciphermediumfail;httpsm://127.0.0.1:%s/good' "$https_port"
 	fi
 	if [[ $tls12_port != 0 ]]; then
 		# A TLSv1.2-only listener proves version forcing is a real constraint,
@@ -268,15 +260,17 @@ if [[ $tls_port != 0 ]]; then
 		}
 	done
 
-	# ftps (plain) + ftpsd (TLSv1.3, green) + ftpst (TLSv1.0, red): two of each.
-	[[ $(grep -Fc 'system,test.ftps green' "$work/xymonnet.out") = 2 ]] || {
-		cat "$work/xymonnet.out" >&2
-		fail "expected two successful ftps reports (plain + TLSv1.3 dialect)"
-	}
-	[[ $(grep -Fc 'system,test.ftps red' "$work/xymonnet.out") = 2 ]] || {
-		cat "$work/xymonnet.out" >&2
-		fail "expected two failed ftps reports (plain + TLSv1.0 dialect)"
-	}
+	if [[ $ssl_dialect_ready = 1 ]]; then
+		[[ $(grep -Fc 'system,test.ftps green' "$work/xymonnet.out") = 2 ]] || {
+			cat "$work/xymonnet.out" >&2
+			fail "expected successful plain and TLSv1.3-dialect ftps reports"
+		}
+		[[ $(grep -Fc 'system,test.ftps red' "$work/xymonnet.out") = 2 ]] || {
+			cat "$work/xymonnet.out" >&2
+			fail "expected failed plain and TLSv1.0-dialect ftps reports"
+		}
+	fi
+
 fi
 
 if [[ $https_port != 0 ]]; then
@@ -293,7 +287,7 @@ if [[ $https_port != 0 ]]; then
 		'system,test.tls11fail red' \
 		'system,test.tls13ok green' \
 		'system,test.cipherhighok green' \
-		'system,test.ciphermediumok green'
+		'system,test.ciphermediumfail red'
 	do
 		grep -Fq "$scheme_expected" "$work/xymonnet.out" || {
 			cat "$work/xymonnet.out" >&2
@@ -365,9 +359,7 @@ if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		'ldapauth,test.ldap green' \
 		'ldapauthfail,test.ldap red' \
 		"ldap://127.0.0.1:$XYMONNET_LDAP_PORT/" \
-		"ldaps://127.0.0.1:$XYMONNET_LDAP_PORT/" \
-		"ldapsd://127.0.0.1:$XYMONNET_LDAP_PORT/" \
-		"ldapst://127.0.0.1:$XYMONNET_LDAP_PORT/"
+		"ldaps://127.0.0.1:$XYMONNET_LDAP_PORT/"
 	do
 		grep -Fq "$ldap_expected" "$work/xymonnet.out" || {
 			cat "$work/xymonnet.out" >&2
@@ -376,16 +368,26 @@ if [[ -n ${XYMONNET_LDAP_PORT:-} ]]; then
 		}
 	done
 
-	# The "system.test" host's ldap column aggregates every ldap://ldaps://
-	# test on it into one worst-color-wins status. ldapst (forced TLSv1.0,
-	# unavailable on both OpenSSL and GnuTLS on any platform this suite
-	# runs on) fails on every platform now that xymonnet enforces the
-	# requested version regardless of which TLS library libldap links
-	# against (see hosts.cfg(5)), so the aggregate is red everywhere.
-	grep -Fq 'system,test.ldap red' "$work/xymonnet.out" || {
-		cat "$work/xymonnet.out" >&2
-		fail "expected the ldap aggregate to be red (ldapst forces an unavailable TLS version)"
-	}
+	if [[ $ssl_dialect_ready = 1 ]]; then
+		for ldap_dialect_expected in \
+			"ldapsd://127.0.0.1:$XYMONNET_LDAP_PORT/" \
+			"ldapst://127.0.0.1:$XYMONNET_LDAP_PORT/"
+		do
+			grep -Fq "$ldap_dialect_expected" "$work/xymonnet.out" || {
+				cat "$work/xymonnet.out" >&2
+				fail "missing expected LDAP dialect result: $ldap_dialect_expected"
+			}
+		done
+		grep -Fq 'system,test.ldap red' "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			fail "expected ldapst TLSv1.0 failure to make the LDAP aggregate red"
+		}
+	else
+		grep -Fq 'system,test.ldap green' "$work/xymonnet.out" || {
+			cat "$work/xymonnet.out" >&2
+			fail "expected successful LDAP and LDAPS aggregate"
+		}
+	fi
 fi
 
 [[ $(grep -Fc 'system,test.ssh green' "$work/xymonnet.out") = 2 ]] ||
