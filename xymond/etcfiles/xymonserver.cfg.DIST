@@ -181,6 +181,7 @@ RRDWIDTH="576"		# The RRD's contain 576 data points, so this is a good value
 TEST2RRD="cpu=la,disk,inode,qtree,memory,$PINGCOLUMN=tcp,http=tcp,dns=tcp,dig=tcp,time=ntpstat,ntp=tcp,vmstat,iostat,netstat,temperature,apache,bind,sendmail,mailq,nmailq=mailq,socks,bea,iishealth,citrix,bbgen,bbtest,bbproxy,hobbitd,files,procs=processes,ports,clock,lines,deltalines,ops,stats,cifs,JVM,JMS,HitCache,Session,JDBCConn,ExecQueue,JTA,TblSpace,RollBack,MemReq,InvObj,snapmirr,snaplist,snapshot,if_load=devmon,temp=devmon,paging,mdc,mdchitpct,cics,dsa,getvis,maxuser,nparts,xymongen,xymonnet,xymonproxy,xymond"
 
 GRAPHS_ntp="ntp.offset"
+GRAPHS_dns="dns-ns,tcp"
 
 # This defines graph names known to the graph display code. On the "trends"
 # column, it also defines which graphs are shown and in what order. The matching
@@ -197,7 +198,7 @@ GRAPHS_ntp="ntp.offset"
 # On status pages, splitting also needs an instance count: either the status
 # message includes "<!-- linecount=N -->", or svcstatus.cgi computes it
 # automatically for columns listed in its --multigraphs option.
-GRAPHS="la,disk,inode,qtree,files,processes,memory,users,vmstat,iostat,tcp.http,tcp,ncv,netstat,ifstat,mrtg::1,ports,temperature,ntpstat,apache,bind,sendmail,mailq,socks,bea,iishealth,citrix,bbgen,bbtest,bbproxy,hobbitd,clock,lines,deltalines,ops,stats,cifs,JVM,JMS,HitCache,Session,JDBCConn,ExecQueue,JTA,TblSpace,RollBack,MemReq,InvObj,snapmirr,snaplist,snapshot,devmon::1,if_load::1,temp,paging,mdc,mdchitpct,cics,dsa,getvis,maxuser,nparts,xymongen,xymonnet,xymonproxy,xymond"
+GRAPHS="la,disk,inode,qtree,files,processes,memory,users,vmstat,iostat,tcp.http,dns-ns,tcp,ncv,netstat,ifstat,mrtg::1,ports,temperature,ntpstat,apache,bind,sendmail,mailq,socks,bea,iishealth,citrix,bbgen,bbtest,bbproxy,hobbitd,clock,lines,deltalines,ops,stats,cifs,JVM,JMS,HitCache,Session,JDBCConn,ExecQueue,JTA,TblSpace,RollBack,MemReq,InvObj,snapmirr,snaplist,snapshot,devmon::1,if_load::1,temp,paging,mdc,mdchitpct,cics,dsa,getvis,maxuser,nparts,xymongen,xymonnet,xymonproxy,xymond"
 
 # Deprecated legacy filesystem graph filters. Prefer DISK/INODE filesystem
 # IGNORE rules in analysis.cfg when a filesystem should be removed from status,

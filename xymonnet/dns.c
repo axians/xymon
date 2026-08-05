@@ -316,14 +316,16 @@ static void dns_crossns_capture_callback(void *arg, int status, int timeouts, un
  * the initial "what are this zone's NS records" discovery query and for
  * re-querying the same atype:tlookup against each discovered NS.
  */
-static unsigned char *dns_crossns_query_one(const char *ip, char *tlookup, int atype, int *alen_out)
+static unsigned char *dns_crossns_query_one(const char *ip, char *tlookup, int atype, int *alen_out, struct timespec *elapsed_out)
 {
 	ares_channel nschannel;
 	struct ares_options options;
 	struct in_addr addr;
 	dns_crossns_capture_t cap;
+	struct timespec starttime, endtime;
 
 	*alen_out = 0;
+	if (elapsed_out) memset(elapsed_out, 0, sizeof(*elapsed_out));
 	if (inet_aton(ip, &addr) == 0) return NULL;
 
 	options.flags = ARES_FLAG_NOCHECKRESP;
@@ -336,8 +338,11 @@ static unsigned char *dns_crossns_query_one(const char *ip, char *tlookup, int a
 	}
 
 	memset(&cap, 0, sizeof(cap));
+	getntimer(&starttime);
 	ares_search(nschannel, tlookup, C_IN, atype, dns_crossns_capture_callback, &cap);
 	dns_ares_queue_run(nschannel);
+	getntimer(&endtime);
+	if (elapsed_out) tvdiff(&starttime, &endtime, elapsed_out);
 	ares_destroy(nschannel);
 
 	*alen_out = cap.alen;
@@ -373,6 +378,7 @@ static int dns_crossns_check(char *serverip, char *tlookup, int atype, char *sta
 	unsigned char **abufs;
 	int *alens;
 	char **labels;
+	struct timespec *timings;
 
 	if (staticns && (strcasecmp(staticns, "off") == 0 || strcasecmp(staticns, "none") == 0)) {
 		return 1; /* cross-NS checking explicitly disabled for this host */
@@ -385,20 +391,22 @@ static int dns_crossns_check(char *serverip, char *tlookup, int atype, char *sta
 		 * anyway but the point is to skip auto-discovery's assumptions). */
 		char *statcopy = strdup(staticns);
 		char *tok;
+		char *saveptr = NULL;
 
 		ns_count = 0;
-		for (tok = strtok(statcopy, ","); tok; tok = strtok(NULL, ",")) ns_count++;
+		for (tok = strtok_r(statcopy, ",", &saveptr); tok; tok = strtok_r(NULL, ",", &saveptr)) ns_count++;
 		xfree(statcopy);
 
 		ns_names = (char **)calloc((size_t)ns_count + 1, sizeof(char *));
 		statcopy = strdup(staticns);
+		saveptr = NULL;
 		i = 0;
-		for (tok = strtok(statcopy, ","); tok; tok = strtok(NULL, ",")) ns_names[i++] = strdup(tok);
+		for (tok = strtok_r(statcopy, ",", &saveptr); tok; tok = strtok_r(NULL, ",", &saveptr)) ns_names[i++] = strdup(tok);
 		ns_names[ns_count] = NULL;
 		xfree(statcopy);
 	}
 	else {
-		ns_abuf = dns_crossns_query_one(serverip, tlookup, T_NS, &ns_alen);
+		ns_abuf = dns_crossns_query_one(serverip, tlookup, T_NS, &ns_alen, NULL);
 		if (!ns_abuf) return 1;
 
 		ns_names = dns_extract_ns_names(ns_abuf, ns_alen);
@@ -421,12 +429,21 @@ static int dns_crossns_check(char *serverip, char *tlookup, int atype, char *sta
 	abufs = (unsigned char **)calloc((size_t)ns_count, sizeof(unsigned char *));
 	alens = (int *)calloc((size_t)ns_count, sizeof(int));
 	labels = (char **)calloc((size_t)ns_count, sizeof(char *));
+	timings = (struct timespec *)calloc((size_t)ns_count, sizeof(struct timespec));
 
 	for (i = 0; i < ns_count; i++) {
 		char *ip = dnsresolve(ns_names[i]);
 
 		labels[i] = strdup(ns_names[i]);
-		if (ip) abufs[i] = dns_crossns_query_one(ip, tlookup, atype, &alens[i]);
+		if (ip) abufs[i] = dns_crossns_query_one(ip, tlookup, atype, &alens[i], &timings[i]);
+		if (abufs[i]) {
+			char msg[512];
+
+			snprintf(msg, sizeof(msg), "NS response time: %s %d:%s %u.%.9ld\n",
+				 labels[i], atype, tlookup,
+				 (unsigned int)timings[i].tv_sec, timings[i].tv_nsec);
+			addtobuffer(banner, msg);
+		}
 	}
 
 	consistent = dns_crossns_evaluate(atype, abufs, alens, (const char **)labels, ns_count, banner);
@@ -440,6 +457,7 @@ static int dns_crossns_check(char *serverip, char *tlookup, int atype, char *sta
 	xfree(abufs);
 	xfree(alens);
 	xfree(labels);
+	xfree(timings);
 
 	return consistent;
 }
@@ -455,6 +473,7 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 	char msg[100];
 	SBUF_DEFINE(tspec);
 	char *tst;
+	char *querysave = NULL;
 	dns_resp_t *responses = NULL;
 	dns_resp_t *walk = NULL;
 	int i;
@@ -483,7 +502,7 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 	tspec = strdup(hostname);
 	tspec_buflen = strlen(tspec) + 1;
 	getntimer(&starttime);
-	tst = strtok(tspec, ",");
+	tst = strtok_r(tspec, ",", &querysave);
 	do {
 		dns_resp_t *newtest = (dns_resp_t *)malloc(sizeof(dns_resp_t));
 		char *p, *tlookup;
@@ -500,7 +519,7 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 
 		dbgprintf("ares_search: tlookup='%s', class=%d, type=%d\n", tlookup, C_IN, atype);
 		ares_search(channel, tlookup, C_IN, atype, dns_detail_callback, newtest);
-		tst = strtok(NULL, ",");
+		tst = strtok_r(NULL, ",", &querysave);
 	} while (tst);
 
 	dns_ares_queue_run(channel);
@@ -509,7 +528,8 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 	tspent = tvdiff(&starttime, &endtime, NULL);
 	clearstrbuffer(banner); status = ARES_SUCCESS;
 	strncpy(tspec, hostname, tspec_buflen);
-	tst = strtok(tspec, ",");
+	querysave = NULL;
+	tst = strtok_r(tspec, ",", &querysave);
 	crossns_ok = 1;
 	for (walk = responses, i=1; (walk); walk = walk->next, i++) {
 		char *p, *tlookup;
@@ -536,7 +556,7 @@ int dns_test_server(char *serverip, char *hostname, char *crossns, strbuffer_t *
 			if (!dns_crossns_check(serverip, tlookup, atype, crossns, banner)) crossns_ok = 0;
 		}
 
-		tst = strtok(NULL, ",");
+		tst = strtok_r(NULL, ",", &querysave);
 	}
 	xfree(tspec);
 	snprintf(msg, sizeof(msg), "\nSeconds: %u.%.9ld\n", (unsigned int)tspent->tv_sec, tspent->tv_nsec);

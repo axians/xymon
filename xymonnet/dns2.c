@@ -41,6 +41,8 @@ static char rcsid[] = "$Id$";
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
+#include <stdarg.h>
 #include <netdb.h>
 
 #include "libxymon.h"
@@ -955,105 +957,147 @@ int dns_soa_is_predecessor(unsigned int candidate, unsigned int reference)
  * yet" case dns_soa_is_predecessor() is meant to classify, rather than a
  * genuine content divergence.
  */
-static void dns_rr_normalize_key(const ares_dns_rr_t *rr, char *buf, size_t buflen, int blank_soa_serial)
+typedef struct {
+	char *data;
+	size_t used;
+	size_t size;
+} dns_normalized_key_t;
+
+static int dns_key_append(dns_normalized_key_t *key, const char *data, size_t len)
 {
-	int type, dnsclass;
-	const char *name;
-	char tmp[1024];
+	char *grown;
+	size_t needed = key->used + len + 1;
 
-	if (rr == NULL) { if (buflen) buf[0] = '\0'; return; }
+	if (needed > key->size) {
+		size_t newsize = (key->size > 0) ? key->size : 128;
+		while (newsize < needed) newsize *= 2;
+		grown = (char *)realloc(key->data, newsize);
+		if (grown == NULL) return 0;
+		key->data = grown;
+		key->size = newsize;
+	}
+	memcpy(key->data + key->used, data, len);
+	key->used += len;
+	key->data[key->used] = '\0';
+	return 1;
+}
 
-	name = ares_dns_rr_get_name(rr);
-	type = (int)ares_dns_rr_get_type(rr);
-	dnsclass = (int)ares_dns_rr_get_class(rr);
+static int dns_key_appendf(dns_normalized_key_t *key, const char *fmt, ...)
+{
+	char buf[64];
+	va_list args;
+	int len;
 
-	snprintf(buf, buflen, "%s|%d|%d|", (name ? name : ""), dnsclass, type);
-	tmp[0] = '\0';
+	va_start(args, fmt);
+	len = vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+	return (len >= 0) && ((size_t)len < sizeof(buf)) && dns_key_append(key, buf, (size_t)len);
+}
 
-	switch (type) {
-	  case ARES_REC_TYPE_CNAME:
-		snprintf(tmp, sizeof(tmp), "%s", ares_dns_rr_get_str(rr, ARES_RR_CNAME_CNAME));
-		break;
+static int dns_key_append_hex(dns_normalized_key_t *key, const unsigned char *data, size_t len)
+{
+	static const char hex[] = "0123456789abcdef";
+	size_t i;
+	char octet[2];
 
-	  case ARES_REC_TYPE_NS:
-		snprintf(tmp, sizeof(tmp), "%s", ares_dns_rr_get_str(rr, ARES_RR_NS_NSDNAME));
-		break;
+	for (i = 0; i < len; i++) {
+		octet[0] = hex[data[i] >> 4];
+		octet[1] = hex[data[i] & 0x0f];
+		if (!dns_key_append(key, octet, sizeof(octet))) return 0;
+	}
+	return 1;
+}
 
-	  case ARES_REC_TYPE_PTR:
-		snprintf(tmp, sizeof(tmp), "%s", ares_dns_rr_get_str(rr, ARES_RR_PTR_DNAME));
-		break;
+static int dns_key_append_name(dns_normalized_key_t *key, const char *name)
+{
+	const unsigned char *walk = (const unsigned char *)(name ? name : "");
+	char ch;
 
-	  case ARES_REC_TYPE_HINFO:
-		snprintf(tmp, sizeof(tmp), "%s|%s",
-			ares_dns_rr_get_str(rr, ARES_RR_HINFO_CPU), ares_dns_rr_get_str(rr, ARES_RR_HINFO_OS));
-		break;
+	while (*walk) {
+		ch = (char)tolower(*walk++);
+		if (!dns_key_append(key, &ch, 1)) return 0;
+	}
+	return 1;
+}
 
-	  case ARES_REC_TYPE_MX:
-		snprintf(tmp, sizeof(tmp), "%u|%s",
-			ares_dns_rr_get_u16(rr, ARES_RR_MX_PREFERENCE), ares_dns_rr_get_str(rr, ARES_RR_MX_EXCHANGE));
-		break;
+static char *dns_rr_normalize_key(const ares_dns_rr_t *rr, int blank_soa_serial)
+{
+	dns_normalized_key_t out = { NULL, 0, 0 };
+	ares_dns_rec_type_t type;
+	const ares_dns_rr_key_t *keys;
+	size_t keycount, i;
 
-	  case ARES_REC_TYPE_SOA:
-		if (blank_soa_serial) {
-			snprintf(tmp, sizeof(tmp), "%s|%s|*|%u|%u|%u|%u",
-				ares_dns_rr_get_str(rr, ARES_RR_SOA_MNAME), ares_dns_rr_get_str(rr, ARES_RR_SOA_RNAME),
-				ares_dns_rr_get_u32(rr, ARES_RR_SOA_REFRESH), ares_dns_rr_get_u32(rr, ARES_RR_SOA_RETRY),
-				ares_dns_rr_get_u32(rr, ARES_RR_SOA_EXPIRE), ares_dns_rr_get_u32(rr, ARES_RR_SOA_MINIMUM));
-		} else {
-			snprintf(tmp, sizeof(tmp), "%s|%s|%u|%u|%u|%u|%u",
-				ares_dns_rr_get_str(rr, ARES_RR_SOA_MNAME), ares_dns_rr_get_str(rr, ARES_RR_SOA_RNAME),
-				ares_dns_rr_get_u32(rr, ARES_RR_SOA_SERIAL), ares_dns_rr_get_u32(rr, ARES_RR_SOA_REFRESH),
-				ares_dns_rr_get_u32(rr, ARES_RR_SOA_RETRY), ares_dns_rr_get_u32(rr, ARES_RR_SOA_EXPIRE),
-				ares_dns_rr_get_u32(rr, ARES_RR_SOA_MINIMUM));
+	if (rr == NULL) return strdup("");
+	type = ares_dns_rr_get_type(rr);
+	if (!dns_key_append_name(&out, ares_dns_rr_get_name(rr)) ||
+	    !dns_key_appendf(&out, "|%d|%d", (int)ares_dns_rr_get_class(rr), (int)type)) goto fail;
+
+	keys = ares_dns_rr_get_keys(type, &keycount);
+	for (i = 0; i < keycount; i++) {
+		ares_dns_rr_key_t rrkey = keys[i];
+		ares_dns_datatype_t datatype = ares_dns_rr_key_datatype(rrkey);
+		size_t j, count, len;
+		const unsigned char *data;
+
+		if (!dns_key_appendf(&out, "|%d:", (int)rrkey)) goto fail;
+		if (blank_soa_serial && (rrkey == ARES_RR_SOA_SERIAL)) {
+			if (!dns_key_append(&out, "*", 1)) goto fail;
+			continue;
 		}
-		break;
 
-	  case ARES_REC_TYPE_TXT:
-	  {
-		size_t cnt = ares_dns_rr_get_abin_cnt(rr, ARES_RR_TXT_DATA);
-		size_t j, off = 0;
-		for (j = 0; j < cnt; j++) {
-			size_t len = 0;
-			const unsigned char *data = ares_dns_rr_get_abin(rr, ARES_RR_TXT_DATA, j, &len);
-			if (off < sizeof(tmp))
-				off += (size_t)snprintf(tmp + off, sizeof(tmp) - off, "%.*s|", (int)len, (data ? (const char *)data : ""));
+		switch (datatype) {
+		  case ARES_DATATYPE_INADDR:
+			data = (const unsigned char *)ares_dns_rr_get_addr(rr, rrkey);
+			if (data && !dns_key_append_hex(&out, data, sizeof(struct in_addr))) goto fail;
+			break;
+		  case ARES_DATATYPE_INADDR6:
+			data = (const unsigned char *)ares_dns_rr_get_addr6(rr, rrkey);
+			if (data && !dns_key_append_hex(&out, data, sizeof(struct ares_in6_addr))) goto fail;
+			break;
+		  case ARES_DATATYPE_U8:
+			if (!dns_key_appendf(&out, "%u", ares_dns_rr_get_u8(rr, rrkey))) goto fail;
+			break;
+		  case ARES_DATATYPE_U16:
+			if (!dns_key_appendf(&out, "%u", ares_dns_rr_get_u16(rr, rrkey))) goto fail;
+			break;
+		  case ARES_DATATYPE_U32:
+			if (!dns_key_appendf(&out, "%u", ares_dns_rr_get_u32(rr, rrkey))) goto fail;
+			break;
+		  case ARES_DATATYPE_NAME:
+			if (!dns_key_append_name(&out, ares_dns_rr_get_str(rr, rrkey))) goto fail;
+			break;
+		  case ARES_DATATYPE_STR:
+			data = (const unsigned char *)ares_dns_rr_get_str(rr, rrkey);
+			len = data ? strlen((const char *)data) : 0;
+			if (!dns_key_appendf(&out, "%lu:", (unsigned long)len) || (len && !dns_key_append(&out, (const char *)data, len))) goto fail;
+			break;
+		  case ARES_DATATYPE_BIN:
+		  case ARES_DATATYPE_BINP:
+			data = ares_dns_rr_get_bin(rr, rrkey, &len);
+			if (!dns_key_appendf(&out, "%lu:", (unsigned long)len) || (data && !dns_key_append_hex(&out, data, len))) goto fail;
+			break;
+		  case ARES_DATATYPE_ABINP:
+			count = ares_dns_rr_get_abin_cnt(rr, rrkey);
+			for (j = 0; j < count; j++) {
+				data = ares_dns_rr_get_abin(rr, rrkey, j, &len);
+				if (!dns_key_appendf(&out, "%lu:", (unsigned long)len) || (data && !dns_key_append_hex(&out, data, len))) goto fail;
+			}
+			break;
+		  case ARES_DATATYPE_OPT:
+			count = ares_dns_rr_get_opt_cnt(rr, rrkey);
+			for (j = 0; j < count; j++) {
+				unsigned short opt = ares_dns_rr_get_opt(rr, rrkey, j, &data, &len);
+				if (!dns_key_appendf(&out, "%u:%lu:", opt, (unsigned long)len) || (data && !dns_key_append_hex(&out, data, len))) goto fail;
+			}
+			break;
 		}
-		break;
-	  }
-
-	  case ARES_REC_TYPE_A:
-	  {
-		const struct in_addr *addr = ares_dns_rr_get_addr(rr, ARES_RR_A_ADDR);
-		if (addr) snprintf(tmp, sizeof(tmp), "%s", inet_ntoa(*addr));
-		break;
-	  }
-
-	  case ARES_REC_TYPE_AAAA:
-	  {
-		const struct ares_in6_addr *addr6 = ares_dns_rr_get_addr6(rr, ARES_RR_AAAA_ADDR);
-		if (addr6) {
-			struct in6_addr localaddr6;
-			char abuf[64];
-			memcpy(&localaddr6, addr6, sizeof(localaddr6));
-			inet_ntop(AF_INET6, &localaddr6, abuf, sizeof(abuf));
-			snprintf(tmp, sizeof(tmp), "%s", abuf);
-		}
-		break;
-	  }
-
-	  case ARES_REC_TYPE_SRV:
-		snprintf(tmp, sizeof(tmp), "%u|%u|%u|%s",
-			ares_dns_rr_get_u16(rr, ARES_RR_SRV_PRIORITY), ares_dns_rr_get_u16(rr, ARES_RR_SRV_WEIGHT),
-			ares_dns_rr_get_u16(rr, ARES_RR_SRV_PORT), ares_dns_rr_get_str(rr, ARES_RR_SRV_TARGET));
-		break;
-
-	  default:
-		/* Other/unsupported types: name|class|type above is already a
-		 * reasonable (if coarse) comparison key on its own. */
-		break;
 	}
 
-	strncat(buf, tmp, (buflen > strlen(buf)) ? (buflen - strlen(buf) - 1) : 0);
+	return out.data ? out.data : strdup("");
+
+fail:
+	xfree(out.data);
+	return strdup("");
 }
 
 static int dns_strcmp_qsort(const void *a, const void *b)
@@ -1081,9 +1125,7 @@ char *dns_section_normalize(ares_dns_record_t *dnsrec, ares_dns_section_t sect, 
 	if (keys == NULL) return strdup("");
 
 	for (i = 0; i < cnt; i++) {
-		char kbuf[1024];
-		dns_rr_normalize_key(ares_dns_record_rr_get_const(dnsrec, sect, i), kbuf, sizeof(kbuf), blank_soa_serial);
-		keys[i] = strdup(kbuf);
+		keys[i] = dns_rr_normalize_key(ares_dns_record_rr_get_const(dnsrec, sect, i), blank_soa_serial);
 		total += strlen(keys[i]) + 1;
 	}
 
@@ -1105,16 +1147,19 @@ char *dns_section_normalize(ares_dns_record_t *dnsrec, ares_dns_section_t sect, 
 
 /*
  * Compare two parsed DNS responses (from two different nameservers, same
- * query) for content equality across all three sections, ignoring record
- * order and TTLs. See dns_rr_normalize_key() for what blank_soa_serial
- * does. Returns true (non-zero) if equal.
+ * query) for equal response codes and answer/authority content, ignoring
+ * record order, TTLs, and optional additional-section glue. See
+ * dns_rr_normalize_key() for what blank_soa_serial does. Returns true
+ * (non-zero) if equal.
  */
 int dns_response_content_equal(ares_dns_record_t *a, ares_dns_record_t *b, int blank_soa_serial)
 {
-	static const ares_dns_section_t sects[3] = { ARES_SECTION_ANSWER, ARES_SECTION_AUTHORITY, ARES_SECTION_ADDITIONAL };
+	static const ares_dns_section_t sects[2] = { ARES_SECTION_ANSWER, ARES_SECTION_AUTHORITY };
 	int i, equal = 1;
 
-	for (i = 0; equal && (i < 3); i++) {
+	if (ares_dns_record_get_rcode(a) != ares_dns_record_get_rcode(b)) return 0;
+
+	for (i = 0; equal && (i < 2); i++) {
 		char *na = dns_section_normalize(a, sects[i], blank_soa_serial);
 		char *nb = dns_section_normalize(b, sects[i], blank_soa_serial);
 		if (strcmp(na, nb) != 0) equal = 0;

@@ -19,6 +19,10 @@ cipher list. Such tests may therefore turn red after upgrading Xymon, or after
 an OpenSSL upgrade invalidates a previously accepted restriction. xymonnet tests
 without a cipher-list restriction are unaffected.
 
+DNS tests using cross-nameserver consistency checking now record and graph the
+response time from each authoritative nameserver. The existing aggregate DNS
+response-time graph remains available.
+
 
 Changes for 4.3.30
 ==================

@@ -11,6 +11,7 @@
 static char do_net_rcsid[] = "$Id$";
 
 #include <math.h>	/* isfinite() - reject nan/inf offset tokens */
+#include <ctype.h>	/* isalnum() - sanitize DNS nameserver RRD filenames */
 
 int do_net_rrd(char *hostname, char *testname, char *classname, char *pagepaths, char *msg, time_t tstamp)
 {
@@ -58,6 +59,56 @@ int do_net_rrd(char *hostname, char *testname, char *classname, char *pagepaths,
 		}
 
 		if (url) xfree(url);
+	}
+	else if (strcmp(testname, "dns") == 0) {
+		char *line = msg;
+
+		while (line && *line) {
+			char *eoln = strchr(line, '\n');
+			char nsname[256], query[256], nsfn[121], queryfn[81], rrdkey[220], extra;
+			double nstime;
+			int fields;
+
+			if (eoln) *eoln = '\0';
+			fields = sscanf(line, "NS response time: %255s %255s %lf %c", nsname, query, &nstime, &extra);
+			if ((fields == 3) &&
+			    isfinite(nstime) && (nstime >= 0.0)) {
+				unsigned int queryhash = 2166136261U;
+				int i, j;
+
+				for (i = 0; nsname[i] && (i < (int)sizeof(nsfn) - 1); i++) {
+					unsigned char ch = (unsigned char)nsname[i];
+					nsfn[i] = (isalnum(ch) || (ch == '.') || (ch == '-') || (ch == '_')) ? ch : '_';
+				}
+				nsfn[i] = '\0';
+				for (i = 0, j = 0; query[i]; i++) {
+					unsigned char ch = (unsigned char)query[i];
+					queryhash = (queryhash ^ ch) * 16777619U;
+					if (j < (int)sizeof(queryfn) - 1)
+						queryfn[j++] = (isalnum(ch) || (ch == '.') || (ch == '-') || (ch == '_')) ? ch : '_';
+				}
+				queryfn[j] = '\0';
+				snprintf(rrdkey, sizeof(rrdkey), "%s.%s.%08x", nsfn, queryfn, queryhash);
+				setupfn3("%s.%s.%s.rrd", "tcp", "dns", rrdkey);
+				snprintf(rrdvalues, sizeof(rrdvalues), "%d:%.9f", (int)tstamp, nstime);
+				create_and_update_rrd(hostname, testname, classname, pagepaths, xymonnet_params, xymonnet_tpl);
+			}
+			else if ((sscanf(line, "NS response time: %255s %lf %c", nsname, &nstime, &extra) == 2) &&
+			         isfinite(nstime) && (nstime >= 0.0)) {
+				int i;
+				for (i = 0; nsname[i] && (i < (int)sizeof(nsfn) - 1); i++) {
+					unsigned char ch = (unsigned char)nsname[i];
+					nsfn[i] = (isalnum(ch) || (ch == '.') || (ch == '-') || (ch == '_')) ? ch : '_';
+				}
+				nsfn[i] = '\0';
+				setupfn3("%s.%s.%s.rrd", "tcp", "dns", nsfn);
+				snprintf(rrdvalues, sizeof(rrdvalues), "%d:%.9f", (int)tstamp, nstime);
+				create_and_update_rrd(hostname, testname, classname, pagepaths, xymonnet_params, xymonnet_tpl);
+			}
+
+			if (eoln) { *eoln = '\n'; line = eoln + 1; }
+			else line = NULL;
+		}
 	}
 	else if (strcmp(testname, xgetenv("PINGCOLUMN")) == 0) {
 		/*
