@@ -29,8 +29,13 @@ HDR="$ROOT/lib/netservices.h"
 SRC="$ROOT/lib/netservices.c"
 SSL="$ROOT/xymonnet/contest.c"
 MAN="$ROOT/xymonnet/protocols.cfg.5"
+HTTP="$ROOT/xymonnet/httptest.c"
+HTTP2="$ROOT/xymonnet/http2.c"
+HTTPRESULT="$ROOT/xymonnet/httpresult.c"
+XYMONNET="$ROOT/xymonnet/xymonnet.c"
+HOSTSMAN="$ROOT/common/hosts.cfg.5"
 
-for f in "$HDR" "$SRC" "$SSL" "$MAN"; do
+for f in "$HDR" "$SRC" "$SSL" "$MAN" "$HTTP" "$HTTP2" "$HTTPRESULT" "$XYMONNET" "$HOSTSMAN"; do
 	[ -f "$f" ] || skip "$(basename "$f") absent"
 done
 
@@ -77,5 +82,47 @@ grep -Eq 'SSL_CTX_set_alpn_protos\(item->sslctx, *alpn_buffer,' "$SSL" \
 # tree that lost the docs is a regression, not a legitimate skip.
 assert_contains "alpn=" "$(cat "$MAN")" \
 	"protocols.cfg.5 no longer documents the alpn= option (#37)"
+
+http=$(cat "$HTTP")
+http2=$(cat "$HTTP2")
+assert_contains 'h2_prior_knowledge = 1' "$http" \
+	"httptest.c no longer enables cleartext HTTP/2 prior knowledge"
+assert_contains 'else res = write(item->fd, buf, len)' "$http2" \
+	"http2.c no longer sends cleartext HTTP/2 frames over the socket"
+assert_contains '(h2->item->ssldata ? "https" : "http")' "$http2" \
+	"http2.c no longer selects the correct HTTP/2 :scheme"
+assert_contains 'stream_id != h2->stream_id' "$http2" \
+	"http2.c no longer isolates response data to the requested stream"
+assert_contains 'h2->stream_reset || (h2->stream_error != NGHTTP2_NO_ERROR)' "$http2" \
+	"http2.c no longer rejects reset HTTP/2 streams"
+assert_not_contains 'atoi((const char *)value)' "$http2" \
+	"http2.c again parses a length-delimited :status as a C string"
+assert_contains 'item->h2session = h2;' "$http2" \
+	"http2.c no longer publishes a fully initialized session"
+ssl=$(cat "$SSL")
+assert_contains 'item->http2sendpending = s;' "$ssl" \
+	"contest.c no longer preserves HTTP/2 writes across backpressure"
+assert_contains '!item->http2sendpending' "$ssl" \
+	"contest.c again closes HTTP/2 connections with pending output"
+assert_contains 'h2_write(h2, h2->pend, h2->pendlen)' "$http2" \
+	"http2.c no longer uses a stable buffer for OpenSSL write retries"
+assert_contains 'while (consumed < len)' "$http2" \
+	"http2.c again drops input not consumed by nghttp2"
+assert_contains 'item->errcode = CONTEST_EIO;' "$ssl" \
+	"contest.c no longer classifies premature HTTP/2 EOF as an I/O error"
+assert_contains 'item->httpstatus = 0 - item->tcptest->errcode;' "$http" \
+	"HTTP transport errors no longer become failed HTTP statuses"
+httpresult=$(cat "$HTTPRESULT")
+assert_contains 'if (req->httpcolor == COL_RED) anydown++;' "$httpresult" \
+	"failed HTTP tests no longer advance the frequent-test counter"
+assert_contains 'firsttest->downcount++;' "$httpresult" \
+	"failed HTTP tests no longer persist their failure count"
+xymonnet=$(cat "$XYMONNET")
+assert_contains 't->host->repeattest = ((getcurrenttime(NULL) - t->downstart) < frequenttestlimit);' "$xymonnet" \
+	"recent HTTP failures are no longer handed to xymonnet-again"
+assert_contains 'if (h->repeattest)' "$xymonnet" \
+	"xymonnet no longer writes frequent-test hosts"
+assert_contains 'httph2://' "$(cat "$HOSTSMAN")" \
+	"hosts.cfg.5 no longer documents cleartext HTTP/2 prior knowledge"
 
 pass "xymonnet keeps the #37 ALPN wiring (flag, parser, SSL setup, manpage)"
