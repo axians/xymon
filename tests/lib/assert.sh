@@ -136,14 +136,22 @@ mktempdir() {
 # ---- repo location -----------------------------------------------------------
 
 # find_root -- print the absolute path of the repo root, derived from the
-# calling test's own location (tests/<area>/<name>.sh -> repo root is two
-# dirs up). Independent of cwd, so the test produces the same result
-# whether invoked from the repo top, a sibling worktree, or anywhere
-# else. Prefer this over `git rev-parse --show-toplevel`, which honours
-# cwd and silently picks the wrong tree when a test is launched from
-# outside its own worktree.
+# calling test's own location. Walk upwards so both tests/<area>/<name>.sh and
+# deeper catalog paths such as tests/system/<component>/<name>.sh work without
+# encoding their depth. Independent of cwd and git, so extracted source trees
+# and tests launched from outside their worktree resolve consistently.
 find_root() {
-	cd "$(dirname "${BASH_SOURCE[1]}")/../.." && pwd
+	local dir
+	dir=$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd) || return 1
+	while [ "$dir" != / ]; do
+		if [ -f "$dir/tests/lib/assert.sh" ]; then
+			printf '%s\n' "$dir"
+			return 0
+		fi
+		dir=${dir%/*}
+		[ -n "$dir" ] || dir=/
+	done
+	fail "cannot locate repository root from ${BASH_SOURCE[1]}"
 }
 
 # ---- binary discovery --------------------------------------------------------

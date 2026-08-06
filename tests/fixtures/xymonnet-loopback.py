@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+import base64
+import os
+import socket
+import ssl
+import struct
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
+        pass
+
+    def send_fixture(
+        self, status=200, body=b"status=ok\n", content_type="text/plain"
+    ):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def do_HEAD(self):
+        if self.path == "/missing":
+            self.send_fixture(404, b"not found\n")
+        else:
+            self.send_fixture()
+
+    def do_GET(self):
+        if self.path == "/missing":
+            self.send_fixture(404, b"not found\n")
+        elif self.path == "/error":
+            self.send_fixture(500, b"internal error\n")
+        elif self.path == "/httpversion":
+            self.send_fixture(body=self.request_version.encode("ascii") + b"\n")
+        elif self.path == "/json":
+            self.send_fixture(
+                body=b'{"status":"ok"}\n', content_type="application/json"
+            )
+        elif self.path == "/redirect":
+            self.send_response(302)
+            self.send_header("Location", "/good")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif self.path == "/auth":
+            credentials = base64.b64encode(b"fixture:password").decode("ascii")
+            expected = "Basic " + credentials
+            if self.headers.get("Authorization") == expected:
+                self.send_fixture(body=b"authenticated\n")
+            else:
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="xymonnet"')
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+        else:
+            self.send_fixture()
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        request = self.rfile.read(length)
+        if (self.path == "/soap" and
+                self.headers.get_content_type() == "application/soap+xml" and
+                request == b"<request/>"):
+            self.send_fixture(
+                body=b"soap-ok\n", content_type="application/soap+xml"
+            )
+        elif self.path == "/soap":
+            self.send_fixture(400, b"soap-fault\n", "application/soap+xml")
+        else:
+            self.send_fixture(body=b"received:" + request + b"\n")
+
+
+def serve_banner(listener, banner):
+    while True:
+        connection, _ = listener.accept()
+        with connection:
+            connection.sendall(banner)
+            connection.recv(1024)
+
+
+def serve_empty(listener):
+    while True:
+        connection, _ = listener.accept()
+        connection.close()
+
+
+def serve_telnet(listener):
+    while True:
+        connection, _ = listener.accept()
+        with connection:
+            connection.settimeout(2)
+            connection.sendall(b"\xff\xfb\x01")
+            try:
+                response = connection.recv(3)
+            except socket.timeout:
+                continue
+            if response == b"\xff\xfe\x01":
+                connection.sendall(b"xymonnet telnet login:\r\n")
+
+
+def serve_ftps(listener, context):
+    while True:
+        connection, _ = listener.accept()
+        try:
+            with context.wrap_socket(
+                connection, server_side=True
+            ) as tls_connection:
+                tls_connection.sendall(b"220 xymon TLS fixture\r\n")
+                tls_connection.recv(1024)
+        except ssl.SSLError:
+            connection.close()
+
+
+def encode_dns_name(name):
+    return b"".join(
+        bytes([len(label)]) + label.encode("ascii")
+        for label in name.rstrip(".").split(".")
+    ) + b"\x00"
+
+
+DNS_ANSWERS = {
+    (1, "fixture.xymon.test"): socket.inet_aton("127.0.0.1"),
+    (2, "ns.fixture.xymon.test"): encode_dns_name("ns1.fixture.xymon.test"),
+    (5, "alias.fixture.xymon.test"): encode_dns_name(
+        "canonical.fixture.xymon.test"
+    ),
+    (6, "soa.fixture.xymon.test"): (
+        encode_dns_name("ns1.fixture.xymon.test")
+        + encode_dns_name("hostmaster.fixture.xymon.test")
+        + struct.pack("!IIIII", 2026080501, 3600, 600, 86400, 60)
+    ),
+    (12, "1.0.0.127.in-addr.arpa"): encode_dns_name(
+        "ptr-target.fixture.xymon.test"
+    ),
+    (15, "mx.fixture.xymon.test"): (
+        struct.pack("!H", 10) + encode_dns_name("mail.fixture.xymon.test")
+    ),
+    (16, "txt.fixture.xymon.test"): b"\x12verification=ready",
+    (28, "aaaa.fixture.xymon.test"): socket.inet_pton(
+        socket.AF_INET6, "2001:db8::1"
+    ),
+    (33, "_service._tcp.fixture.xymon.test"): (
+        struct.pack("!HHH", 10, 20, 443)
+        + encode_dns_name("service.fixture.xymon.test")
+    ),
+}
+
+
+def serve_dns(dns_socket):
+    while True:
+        request, client = dns_socket.recvfrom(4096)
+        try:
+            offset = 12
+            labels = []
+            while request[offset] != 0:
+                label_length = request[offset]
+                offset += 1
+                label = request[offset:offset + label_length].decode("ascii")
+                labels.append(label)
+                offset += label_length
+            question_end = offset + 5
+            query_type = struct.unpack(
+                "!H", request[question_end - 4:question_end - 2]
+            )[0]
+            query_name = ".".join(labels)
+            query_flags = struct.unpack("!H", request[2:4])[0]
+            response_flags = 0x8400 | (query_flags & 0x0100)
+            answer = DNS_ANSWERS.get((query_type, query_name))
+            answer_count = int(answer is not None)
+            if answer_count == 0:
+                response_flags |= 3
+            response = struct.pack(
+                "!HHHHHH",
+                struct.unpack("!H", request[:2])[0],
+                response_flags,
+                1,
+                answer_count,
+                0,
+                0,
+            ) + request[12:question_end]
+            if answer_count:
+                response += (
+                    b"\xc0\x0c"
+                    + struct.pack("!HHIH", query_type, 1, 60, len(answer))
+                    + answer
+                )
+            dns_socket.sendto(response, client)
+        except (IndexError, UnicodeDecodeError, struct.error):
+            continue
+
+
+def ntp_timestamp(timestamp):
+    ntp_time = timestamp + 2208988800
+    seconds = int(ntp_time)
+    fraction = int((ntp_time - seconds) * 4294967296)
+    return struct.pack("!II", seconds, fraction)
+
+
+def serve_ntp(ntp_socket):
+    while True:
+        request, client = ntp_socket.recvfrom(512)
+        if len(request) < 48:
+            continue
+        received = time.time()
+        response = bytearray(48)
+        response[0] = (request[0] & 0x38) | 4
+        response[1] = 2
+        response[2] = request[2]
+        response[3] = 0xec
+        response[8:12] = struct.pack("!I", 1 << 10)
+        response[12:16] = b"LOCL"
+        response[16:24] = ntp_timestamp(received - 1)
+        response[24:32] = request[40:48]
+        response[32:40] = ntp_timestamp(received)
+        response[40:48] = ntp_timestamp(time.time())
+        ntp_socket.sendto(response, client)
+
+
+def make_listener():
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    return listener
+
+
+def main():
+    if len(sys.argv) not in (2, 4):
+        raise SystemExit("usage: xymonnet-loopback.py READYFILE [CERT KEY]")
+
+    ssh_listener = make_listener()
+    bad_banner_listener = make_listener()
+    ftp_listener = make_listener()
+    telnet_listener = make_listener()
+    empty_listener = make_listener()
+
+    tls_listener = None
+    tls_context = None
+    httpsd = None
+    mtlsd = None
+    tls12d = None
+    if len(sys.argv) == 4:
+        tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls_context.load_cert_chain(sys.argv[2], sys.argv[3])
+        tls_listener = make_listener()
+        httpsd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        httpsd.socket = tls_context.wrap_socket(
+            httpsd.socket, server_side=True
+        )
+        mtls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        mtls_context.load_cert_chain(sys.argv[2], sys.argv[3])
+        mtls_context.load_verify_locations(sys.argv[2])
+        mtls_context.verify_mode = ssl.CERT_REQUIRED
+        mtlsd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        mtlsd.socket = mtls_context.wrap_socket(
+            mtlsd.socket, server_side=True
+        )
+        # Pinned to TLSv1.2 only, so tests can prove xymonnet's "c"/"d"
+        # scheme-suffix version forcing actually constrains the handshake,
+        # not just that some default TLS version happens to work.
+        tls12_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls12_context.load_cert_chain(sys.argv[2], sys.argv[3])
+        tls12_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        tls12_context.maximum_version = ssl.TLSVersion.TLSv1_2
+        tls12d = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        tls12d.socket = tls12_context.wrap_socket(
+            tls12d.socket, server_side=True
+        )
+
+    dns_socket = None
+    if os.environ.get("XYMONNET_DNS_FIXTURE") == "1":
+        dns_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        dns_socket.bind(("127.0.0.1", 53))
+
+    ntp_socket = None
+    if os.environ.get("XYMONNET_NTP_FIXTURE") == "1":
+        ntp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        ntp_socket.bind(("127.0.0.1", 123))
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    with open(sys.argv[1], "w", encoding="ascii") as ready:
+        tls_port = tls_listener.getsockname()[1] if tls_listener else 0
+        https_port = httpsd.server_port if httpsd else 0
+        mtls_port = mtlsd.server_port if mtlsd else 0
+        tls12_port = tls12d.server_port if tls12d else 0
+        dns_ready = "1" if dns_socket else ""
+        ntp_ready = "1" if ntp_socket else ""
+        ready.write(
+            f"{httpd.server_port} {ssh_listener.getsockname()[1]} "
+            f"{bad_banner_listener.getsockname()[1]} "
+            f"{ftp_listener.getsockname()[1]} "
+            f"{telnet_listener.getsockname()[1]} {tls_port} {https_port} "
+            f"{mtls_port} {dns_ready or '0'} {ntp_ready or '0'} "
+            f"{empty_listener.getsockname()[1]} {tls12_port}\n"
+        )
+
+    threading.Thread(
+        target=serve_banner,
+        args=(ssh_listener, b"SSH-2.0-xymon-fixture\r\n"),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=serve_banner,
+        args=(bad_banner_listener, b"unexpected banner\r\n"),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=serve_banner,
+        args=(ftp_listener, b"220 xymon FTP fixture\r\n"),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=serve_telnet, args=(telnet_listener,), daemon=True
+    ).start()
+    threading.Thread(
+        target=serve_empty, args=(empty_listener,), daemon=True
+    ).start()
+    if tls_listener and tls_context:
+        threading.Thread(
+            target=serve_ftps, args=(tls_listener, tls_context), daemon=True
+        ).start()
+    if httpsd:
+        threading.Thread(target=httpsd.serve_forever, daemon=True).start()
+    if mtlsd:
+        threading.Thread(target=mtlsd.serve_forever, daemon=True).start()
+    if tls12d:
+        threading.Thread(target=tls12d.serve_forever, daemon=True).start()
+    if dns_socket:
+        threading.Thread(
+            target=serve_dns, args=(dns_socket,), daemon=True
+        ).start()
+    if ntp_socket:
+        threading.Thread(
+            target=serve_ntp, args=(ntp_socket,), daemon=True
+        ).start()
+    httpd.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

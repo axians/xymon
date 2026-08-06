@@ -13,15 +13,93 @@ From a fresh checkout, no build required:
 
     ./tests/testsuite
 
-It discovers every executable `tests/**/*.sh`, runs each, and prints a
-pass/skip/fail summary (exit `0` = pass, `77` = skip, anything else = fail).
-Output adapts on its own: plain text on a terminal, GitHub Actions annotations
-under CI — the workflow and a developer run the exact same runner.
+This runs the regression catalog: every executable `tests/**/*.sh` except
+entries below `tests/system/`. It prints a pass/skip/fail summary (exit `0` =
+pass, `77` = skip, anything else = fail). Output adapts on its own: plain text
+on a terminal, GitHub Actions annotations under CI — the workflow and a
+developer run the exact same runner.
+
+Full-system scenarios have their own catalog. They drive complete built
+binaries against deterministic local services and can take longer or require
+additional host capabilities:
+
+  ./tests/testsuite system
+
+Use `./tests/testsuite all` to run both catalogs explicitly. System tests are
+organised by component below `tests/system/`; the runner discovers new
+component directories recursively without needing a hard-coded list.
 
 Once the tree is configured, `make test` runs the same thing. A single
 test also runs standalone — what reviewers do:
 
     ./tests/client/fs-filter-linux.sh
+
+Select another catalog through Make with `make test TEST_CATALOG=system`.
+
+The full `xymonnet` system scenario runs after `xymonnet` has been built:
+
+  ./tests/system/network/xymonnet-loopback.sh
+
+For a reproducible build and native system run, use the Podman launcher. It
+defaults to Ubuntu, and also supports Rocky Linux 10 (RHEL-family); the
+container-side script detects the OS family from `/etc/os-release` and adjusts
+package manager, package names, and OpenLDAP schema/module paths accordingly
+-- no extra flags needed beyond the image itself. It copies the read-only
+source mount into the container before configuring and building, so it does
+not modify the checkout. The container also starts
+OpenLDAP, DNS, NTP, HTTP(S), TCP, TLS, and telnet fixtures. The loopback matrix
+covers 79 probes, including authenticated LDAP searches, LDAPv3 STARTTLS, HTTP
+passwords from hosts.cfg URLs and netrc, TLS client certificate authentication,
+HTTP redirects, strict TCP response checking, telnet negotiation, httpstatus
+regex matching across status classes (including PCRE alternation and the
+"connected but no response" 999 fallback), the hosts.cfg(5) SSL/TLS scheme-suffix
+dialects on http(s), ftps/telnets/smtps/pop3s/imaps/nntps, and ldap(s) (forced
+SSLv2/v3, TLSv1.0-1.3, cipher-strength, and HTTP/1.0 vs 1.1), and positive,
+dial-up, and reverse ping checks. Green behaviors are paired with
+deterministic failure paths:
+
+  ./build/xymonnet-system-podman.sh
+
+Valgrind is not enabled by default in either catalog. Request Memcheck
+explicitly for the same containerized scenario:
+
+  XYMONNET_VALGRIND=1 ./build/xymonnet-system-podman.sh
+
+Run the same scenario against Rocky Linux 10 with `XYMON_SYSTEM_IMAGE`
+(use the fully-qualified name if the "rockylinux" short name isn't
+configured in your Podman registries):
+
+  XYMON_SYSTEM_IMAGE=quay.io/rockylinux/rockylinux:10 ./build/xymonnet-system-podman.sh
+
+One behavioral difference is expected, not a failure: `libldap`'s TLS backend
+differs between distros (GnuTLS on Debian/Ubuntu, OpenSSL on RHEL-family --
+check yours with `ldd $(which ldapsearch) | grep -iE 'ssl|gnutls'`), and only
+the OpenSSL-linked build actually enforces the SSL/TLS version forced by a
+`ldaps://` scheme-suffix dialect (see hosts.cfg(5)). The loopback test reads
+its own container's OS family to assert the color that's actually correct for
+each, so this shows up as intentional, documented test logic, not as a skip.
+
+The launcher keeps APT packages and index lists in the named Podman volumes
+`xymon-system-apt-cache` and `xymon-system-apt-lists`, and dnf's package
+cache in `xymon-system-dnf-cache`. Override the names with
+`XYMON_SYSTEM_APT_CACHE_VOLUME`, `XYMON_SYSTEM_APT_LISTS_VOLUME`, and
+`XYMON_SYSTEM_DNF_CACHE_VOLUME`, or clear the defaults with:
+
+  podman volume rm xymon-system-apt-cache xymon-system-apt-lists xymon-system-dnf-cache
+
+There's a second, plainer Podman launcher for the regression catalog itself
+(no network fixtures) -- a clean-room build-and-test of a full Xymon server
+tree, most useful for exercising `tests/server/xymongen-*.sh` and everything
+else `require_bin` gates on distros other than your host's:
+
+  ./build/xymongen-podman.sh
+  XYMON_SYSTEM_IMAGE=quay.io/rockylinux/rockylinux:10 ./build/xymongen-podman.sh
+
+It shares the same cache volumes and `XYMON_SYSTEM_IMAGE`/`XYMON_SYSTEM_*_VOLUME`
+overrides as the launcher above. See tests/lib/xymongen-container.sh for a
+container-environment quirk it works around: the plain `docker.io/library/
+ubuntu:24.04` image links standalone tools as non-PIE objects into a PIE
+default, which the actual CI build (a different Ubuntu image) does not hit.
 
 `bash` is a hard prerequisite of the suite (every test uses it; see
 Conventions). The runner itself is POSIX sh, and on a host without bash it
@@ -46,17 +124,19 @@ shipped-file invariants) get their own area.
 | Area              | What lives here                                        |
 | ----------------- | ------------------------------------------------------ |
 | `tests/client/`   | xymon client tools and behaviours                      |
-| `tests/server/`   | xymond-side tools (xymongrep, xymoncgimsg, alert routing) |
+| `tests/server/`   | xymond-side tools (xymongrep, xymoncgimsg, alert routing, xymongen page rendering) |
 | `tests/network/`  | xymonnet probes (xymonping, network checks)            |
 | `tests/web/`      | CGIs, HTML rendering paths                             |
 | `tests/packaging/`| cross-cutting: shipped files, paths, generated configs |
 | `tests/buildsystem/` | parallel make, configure probes, CMake feature detection |
-| `tests/integration/` | end-to-end scenarios spanning multiple components   |
+| `tests/system/<component>/` | full built binaries with local service fixtures |
 | `tests/lib/`      | sourced helpers (`assert.sh`, future `net.sh` etc.)    |
 | `tests/fixtures/` | shared data files (config snippets, expected outputs)  |
 
-Add a new area by PR when an existing one doesn't fit. Don't bend a
-test to fit the wrong area just to avoid creating a new directory.
+Add a new area by PR when an existing one doesn't fit. Don't bend a test to fit
+the wrong area just to avoid creating a new directory. A system scenario goes
+under the component it exercises, such as `tests/system/server/` or
+`tests/system/web/`; adding that directory requires no runner change.
 
 ### Runnable vs sourced/data files
 
@@ -140,16 +220,18 @@ maintenance.
 
 ## How to add a regression scenario
 
-1. Pick the area: `tests/<area>/<scenario>.sh`. Create the subdirectory
-   if needed.
+1. Pick the catalog and area. Focused regressions use
+  `tests/<area>/<scenario>.sh`; complete built-binary scenarios use
+  `tests/system/<component>/<scenario>.sh`. Create the subdirectory if needed.
 2. Copy the SPDX header and the strict-mode preamble from any existing
    test as a starting point.
 3. Source the helpers: `. "$(dirname "$0")/../lib/assert.sh"`.
 4. Drive the scenario: set up fixtures in a temp dir, invoke the
    binary or script under test, assert on its output / exit code /
    side effects.
-5. Run it standalone. If it passes locally and is deterministic, open
-   the PR. CI will run it on every push.
+5. Run it standalone and through its catalog. If it passes locally and is
+  deterministic, open the PR. The default CI runs the regression catalog;
+  system scenarios can be run together with `./tests/testsuite system`.
 
 ## Why no framework
 

@@ -142,11 +142,11 @@ win32: include/config.h
 #####################
 # Regression testsuite
 #####################
-# Runs every executable test under tests/ via the shared runner. The runner
-# resolves the repo root itself, so it works from any cwd. See tests/README.md.
+# Runs the selected catalog via the shared runner. TEST_CATALOG defaults to the
+# runner's regression catalog. See tests/README.md.
 .PHONY: test
 test:
-	$(BUILDTOPDIR)/tests/testsuite
+	$(BUILDTOPDIR)/tests/testsuite $(TEST_CATALOG)
 
 # Cleanup targets
 #####################
