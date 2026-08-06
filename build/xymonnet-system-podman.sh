@@ -7,9 +7,6 @@
 # tests/lib/xymonnet-system-container.sh for which OS families are
 # recognized (apt/dnf package sets, OpenLDAP schema/module paths, etc.) --
 # it detects the family from /etc/os-release, so no other flag is needed.
-# Until merged into the tested source branch, the complete scenario also
-# requires upstream PR #273 (nosoap parsing) and PR #274 (initialized HTTP
-# SSL options). The DNS feature-branch validation overlays both fixes.
 
 set -euo pipefail
 
