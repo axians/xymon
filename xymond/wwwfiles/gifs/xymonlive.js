@@ -40,7 +40,7 @@
 		var urls = new Map((statuses || []).map(function (status) { return [keyOf(status), status]; }));
 		if (initialized || events.length || !Array.isArray(seed)) return;
 		events = seed.filter(function (event) {
-			return event && event.host && event.test && event.previousColor && event.color && Number.isFinite(event.time);
+			return event && event.host && event.test && event.previousColor && event.color && event.previousColor !== event.color && Number.isFinite(event.time);
 		}).map(function (event) {
 			var status = urls.get(keyOf(event));
 			if (status) {

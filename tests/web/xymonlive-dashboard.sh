@@ -149,6 +149,8 @@ assert_contains 'hostUrl: status.hostUrl, serviceUrl: status.serviceUrl' "$js_te
 	"live transitions must retain canonical Xymon links"
 assert_contains 'event.previousColor && event.color' "$js_text" \
 	"seeded transitions must describe the previous and current snapshot colors"
+assert_contains 'event.previousColor !== event.color' "$js_text" \
+	"recent changes must exclude repeated same-color reports"
 assert_not_contains 'event.from' "$js_text" \
 	"seeded transitions must not use ambiguous from/to color names"
 assert_contains 'if (initialized || events.length || !Array.isArray(seed)) return' "$js_text" \
