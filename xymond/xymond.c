@@ -124,7 +124,7 @@ typedef struct xymond_log_t {
 	struct xymond_hostlist_t *host;
 	testinfo_t *test;
 	char *origin;
-	int color, oldcolor, activealert, histsynced, downtimeactive, flapping, oldflapcolor, currflapcolor;
+	int color, oldcolor, previouscolor, activealert, histsynced, downtimeactive, flapping, oldflapcolor, currflapcolor;
 	char *testflags;
 	char *grouplist;        /* For extended status reports (e.g. from xymond_client) */
 	char sender[IP_ADDR_STRLEN];
@@ -5130,6 +5130,9 @@ void save_checkpoint(void)
 			if (iores >= 0) iores = fprintf(fd, "|%s", msgstr);
 			if (iores >= 0) iores = fprintf(fd, "|%d|%d", (int)lwalk->redstart, (int)lwalk->yellowstart);
 			if (iores >= 0) iores = fprintf(fd, "\n");
+			if ((iores >= 0) && (lwalk->previouscolor != NO_COLOR))
+				iores = fprintf(fd, "@@XYMONDCHK-V1|.previouscolor.|%s|%s|%s\n",
+						hwalk->hostname, lwalk->test->name, colnames[lwalk->previouscolor]);
 
 			/*
 			 * Own record, not extra fields on the status record: that one is
@@ -5305,6 +5308,32 @@ void load_checkpoint(char *fn)
 				xfree(newtask);
 			}
 
+			continue;
+		}
+
+		if (strncmp(STRBUF(inbuf), "@@XYMONDCHK-V1|.previouscolor.|", 31) == 0) {
+			xymond_log_t *log = NULL;
+			int previouscolor = NO_COLOR;
+
+			hitem = NULL; t = NULL;
+			item = gettok(STRBUF(inbuf), "|\n"); i = 0;
+			while (item) {
+				switch (i) {
+				  case 2:
+					hosthandle = xtreeFind(rbhosts, item);
+					hitem = (hosthandle == xtreeEnd(rbhosts)) ? NULL : xtreeData(rbhosts, hosthandle);
+					break;
+				  case 3:
+					testhandle = xtreeFind(rbtests, item);
+					t = (testhandle == xtreeEnd(rbtests)) ? NULL : xtreeData(rbtests, testhandle);
+					break;
+				  case 4: previouscolor = restore_color(item); break;
+				  default: break;
+				}
+				item = gettok(NULL, "|\n"); i++;
+			}
+			if (hitem && t) for (log = hitem->logs; (log && (log->test != t)); log = log->next) ;
+			if (log) log->previouscolor = previouscolor;
 			continue;
 		}
 
@@ -5571,6 +5600,7 @@ void load_checkpoint(char *fn)
 		ltail->origin = origin;
 		ltail->color = color;
 		ltail->oldcolor = oldcolor;
+		ltail->previouscolor = NO_COLOR;
 		ltail->activealert = (decide_alertstate(color) == A_ALERT);
 		ltail->histsynced = 0;
 		ltail->testflags = ( (testflags && strlen(testflags)) ? strdup(testflags) : NULL);

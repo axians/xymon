@@ -1,0 +1,36 @@
+.TH XYMONLIVE.CGI 1 "Version 4.3.31" "Xymon"
+.SH NAME
+xymonlive.cgi \- live browser view of current Xymon statuses
+.SH SYNOPSIS
+.B "xymonlive.cgi [options]"
+.SH DESCRIPTION
+.B xymonlive.cgi
+serves an HTML5 dashboard that polls xymond directly. It does not read the
+history or allevents files. The dashboard shows current red, yellow, purple,
+and blue statuses, acknowledgement and disabled state, and observed changes
+between browser polls.
+.PP
+The change list is intentionally a sampled browser view, not a durable event
+log. A status that changes twice between polls may not appear, and a status
+that leaves the non-green set is shown as green.
+.PP
+With the query parameter
+.B data=1
+the CGI returns the current status snapshot as JSON. This mode is used by the
+dashboard and is not intended as a replacement for the Xymon channel protocol.
+.PP
+JSON snapshots are cached in XYMONTMP. Concurrent requests share a cached
+snapshot, and only one CGI process refreshes it from xymond. During a refresh
+or a temporary xymond failure, an existing stale snapshot remains available.
+.SH OPTIONS
+.IP "\fB\-\-env=FILENAME\fR"
+Load the Xymon environment from FILENAME.
+.IP "\fB\-\-area=NAME\fR"
+Load environment settings for the named area.
+.IP "\fB\-\-cache=SECONDS\fR"
+Cache JSON snapshots for this many seconds. The default is 3 seconds. Set this
+to 0 to disable caching.
+.IP "\fB\-\-debug\fR"
+Enable debugging output.
+.SH SEE ALSO
+xymon(1), xymond(8), appfeed.cgi(1)
