@@ -130,6 +130,8 @@
 # variables to the invoked program:
 #
 #    BBCOLORLEVEL      - The color of the alert: "red", "yellow" or "purple"
+#    BBOLDCOLOR        - The color recorded at the previous report
+#    BBPREVIOUSCOLOR   - The color held before the most recent actual change
 #    BBALPHAMSG        - The full text of the status log triggering the alert
 #    ACKCODE           - The "cookie" that can be used to acknowledge the alert
 #    RCPT              - The recipient, from the SCRIPT entry

@@ -905,6 +905,10 @@ void posttochannel(xymond_channel_t *channel, char *channelmarker,
 						mwalk = mwalk->next;
 					}
 				}
+				if (n < (bufsz-5)) {
+					n += snprintf(channel->channelbuf+n, (bufsz-n-5), "|%s",
+						colnames[log->prevchangecolor]);
+				}
 
 				if (n < (bufsz-5)) {
 					n += snprintf(channel->channelbuf+n, (bufsz-n-5), "\n%s", msg);

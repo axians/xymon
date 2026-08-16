@@ -172,6 +172,12 @@ Such scripts have access to the following environment variables:
 .sp
 .IP "\fBBBCOLORLEVEL\fR"
 The color of the alert: "red", "yellow" or "purple".
+.IP "\fBBBOLDCOLOR\fR"
+The color xymond recorded at the previous report, whether or not it differed.
+This is \fBnone\fR on the first report.
+.IP "\fBBBPREVIOUSCOLOR\fR"
+The color held before the most recent actual color change. Repeated reports do
+not change this value. This is \fBnone\fR until the first color change.
 .IP "\fBBBALPHAMSG\fR"
 The full text of the status log triggering the alert
 .IP "\fBACKCODE\fR"

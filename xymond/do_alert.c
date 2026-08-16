@@ -518,7 +518,7 @@ void send_alert(activealerts_t *alert, FILE *logfd)
 					void *hinfo;
 					char *p;
 					int ip1=0, ip2=0, ip3=0, ip4=0;
-					char *ackcode, *rcpt, *bbhostname, *bbhostsvc, *bbhostsvccommas, *bbnumeric, *machip, *bbsvcname, *bbsvcnum, *bbcolorlevel, *recovered, *downsecs, *eventtstamp, *downsecsmsg, *cfidtxt;
+					char *ackcode, *rcpt, *bbhostname, *bbhostsvc, *bbhostsvccommas, *bbnumeric, *machip, *bbsvcname, *bbsvcnum, *bbcolorlevel, *bboldcolor, *bbpreviouscolor, *recovered, *downsecs, *eventtstamp, *downsecsmsg, *cfidtxt;
 					char *alertid, *alertidenv;
 					int msglen;
 
@@ -580,6 +580,14 @@ void send_alert(activealerts_t *alert, FILE *logfd)
 					bbcolorlevel = (char *)malloc(strlen("BBCOLORLEVEL=") + strlen(colorname(alert->color)) + 1);
 					sprintf(bbcolorlevel, "BBCOLORLEVEL=%s", colorname(alert->color));
 					putenv(bbcolorlevel);
+
+					bboldcolor = (char *)malloc(strlen("BBOLDCOLOR=") + strlen((alert->oldcolor == -1) ? "none" : colorname(alert->oldcolor)) + 1);
+					sprintf(bboldcolor, "BBOLDCOLOR=%s", (alert->oldcolor == -1) ? "none" : colorname(alert->oldcolor));
+					putenv(bboldcolor);
+
+					bbpreviouscolor = (char *)malloc(strlen("BBPREVIOUSCOLOR=") + strlen((alert->previouscolor == -1) ? "none" : colorname(alert->previouscolor)) + 1);
+					sprintf(bbpreviouscolor, "BBPREVIOUSCOLOR=%s", (alert->previouscolor == -1) ? "none" : colorname(alert->previouscolor));
+					putenv(bbpreviouscolor);
 
 					recovered = (char *)malloc(strlen("RECOVERED=") + 2);
 					switch (alert->state) {

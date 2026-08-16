@@ -32,7 +32,7 @@ typedef struct activealerts_t {
 	char ip[IP_ADDR_STRLEN];
 
 	/* Alert status */
-	int color, maxcolor;
+	int color, oldcolor, previouscolor, maxcolor;
 	unsigned char *pagemessage;
 	unsigned char *ackmessage;
 	time_t eventstart;

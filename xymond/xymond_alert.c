@@ -256,7 +256,9 @@ void save_checkpoint(char *filename)
 		if (awalk->pagemessage) pgmsg = nlencode(awalk->pagemessage);
 		fprintf(fd, "%s|", pgmsg);
 		if (awalk->ackmessage) ackmsg = nlencode(awalk->ackmessage);
-		fprintf(fd, "%s\n", ackmsg);
+		fprintf(fd, "%s|%s|%s\n", ackmsg,
+			(awalk->oldcolor == -1) ? "none" : colorname(awalk->oldcolor),
+			(awalk->previouscolor == -1) ? "none" : colorname(awalk->previouscolor));
 	}
 	fclose(fd);
 
@@ -328,6 +330,8 @@ int load_checkpoint(char *filename)
 			newalert->location = find_name(locations, item[2]);
 			strcpy(newalert->ip, item[3]);
 			newalert->color = newalert->maxcolor = parse_color(item[4]);
+			newalert->oldcolor = ((i > 10) ? parse_color(item[10]) : -1);
+			newalert->previouscolor = ((i > 11) ? parse_color(item[11]) : -1);
 			newalert->eventstart = (time_t) atoi(item[5]);
 			newalert->nextalerttime = (time_t) atoi(item[6]);
 			newalert->state = A_PAGING;
@@ -497,6 +501,7 @@ int main(int argc, char *argv[])
 			awalk->location = find_name(locations, testpage);
 			strcpy(awalk->ip, "127.0.0.1");
 			awalk->color = awalk->maxcolor = parse_color(testcolor);
+			awalk->oldcolor = awalk->previouscolor = -1;
 			awalk->pagemessage = "Test of the alert configuration";
 			awalk->eventstart = getcurrenttime(NULL) - testdur*60;
 			awalk->groups = (testgroups ? strdup(testgroups) : NULL);
@@ -656,7 +661,7 @@ int main(int argc, char *argv[])
 		if (metacount > 4) testname = metadata[4];
 
 		if ((metacount > 10) && (strncmp(metadata[0], "@@page", 6) == 0)) {
-			/* @@page|timestamp|sender|hostname|testname|hostip|expiretime|color|prevcolor|changetime|location|cookie|osname|classname|grouplist|modifiers */
+			/* @@page|timestamp|sender|hostname|testname|hostip|expiretime|color|oldcolor|changetime|location|cookie|osname|classname|grouplist|modifiers|previouscolor */
 
 			int newcolor, newalertstatus, oldalertstatus;
 
@@ -674,6 +679,7 @@ int main(int argc, char *argv[])
 				awalk->testname = twalk;
 				awalk->location = pwalk;
 				awalk->cookie = -1;
+				awalk->oldcolor = awalk->previouscolor = -1;
 				awalk->state = A_DEAD;
 				/*
 				 * Use changetime here, if we restart the alert module then
@@ -688,6 +694,8 @@ int main(int argc, char *argv[])
 			}
 
 			newcolor = parse_color(metadata[7]);
+			awalk->oldcolor = parse_color(metadata[8]);
+			awalk->previouscolor = ((metacount > 16) ? parse_color(metadata[16]) : -1);
 			oldalertstatus = ((alertcolors & (1 << awalk->color)) != 0);
 			newalertstatus = ((alertcolors & (1 << newcolor)) != 0);
 
@@ -803,6 +811,7 @@ int main(int argc, char *argv[])
 			awalk->testname = twalk;
 			awalk->location = pwalk;
 			awalk->cookie = -1;
+			awalk->oldcolor = awalk->previouscolor = -1;
 			awalk->pagemessage = strdup(restofmsg);
 			awalk->eventstart = getcurrenttime(NULL);
 			awalk->state = A_NOTIFY;
