@@ -25,7 +25,7 @@ PROGRAMS += $(SNMPPROGRAMS)
 endif
 all: $(PROGRAMS) $(EXTENSIONS) $(DBGTOOLS)
 
-NETTESTOBJS = xymonnet.o contest.o httptest.o httpresult.o ldaptest.o dns.o dns2.o httpcookies.o udpquery.o
+NETTESTOBJS = xymonnet.o contest.o httptest.o httpheaders.o httpresult.o ldaptest.o dns.o dns2.o httpcookies.o udpquery.o
 PINGTESTOBJS = xymonping.o
 BEASTATOBJS = beastat.o
 
@@ -43,8 +43,14 @@ udpquery.o: udpquery.c udpquery.h
 ldaptest.o: ldaptest.c
 	$(CC) $(CFLAGS) $(LDAPFLAGS) $(LDAPINCDIR) -c -o $@ ldaptest.c
 
-httptest.o: httptest.c
+httptest.o: httptest.c httpheaders.h
 	$(CC) $(CFLAGS) $(SSLFLAGS) $(SSLINCDIR) -c -o $@ httptest.c
+
+httpheaders.o: httpheaders.c httpheaders.h
+
+test-httpheaders: test-httpheaders.c httpheaders.c httpheaders.h
+	$(CC) $(CFLAGS) -o $@ test-httpheaders.c httpheaders.c
+	./test-httpheaders
 
 httpresult.o: httpresult.c
 	$(CC) $(CFLAGS) $(SSLFLAGS) $(SSLINCDIR) -c -o $@ httpresult.c
@@ -81,8 +87,8 @@ beastat.o: beastat.c
 	$(CC) $(CFLAGS) $(PCREINCDIR) -c -o $@ beastat.c
 
 
-contest: contest.c httptest.o dns.o dns2.o httpcookies.o $(XYMONCOMMLIB) $(XYMONTIMELIB)
-	$(CC) $(CFLAGS) -o contest -I../include $(CARESINC) -DSTANDALONE contest.c httptest.o dns.o dns2.o httpcookies.o $(CARESLIBS) $(XYMONCOMMLIBS) $(XYMONTIMELIBS)
+contest: contest.c httptest.o httpheaders.o dns.o dns2.o httpcookies.o $(XYMONCOMMLIB) $(XYMONTIMELIB)
+	$(CC) $(CFLAGS) -o contest -I../include $(CARESINC) -DSTANDALONE contest.c httptest.o httpheaders.o dns.o dns2.o httpcookies.o $(CARESLIBS) $(XYMONCOMMLIBS) $(XYMONTIMELIBS)
 
 
 # net-snmp-config exports the distro's full build policy along with the
@@ -120,7 +126,7 @@ xymon-snmpcollect.o: xymon-snmpcollect.c
 	chmod 755 $@
 
 clean:
-	rm -f *.o *.a *~ $(PROGRAMS) $(EXTENSIONS) $(DBGTOOLS)
+	rm -f *.o *.a *~ $(PROGRAMS) $(EXTENSIONS) $(DBGTOOLS) test-httpheaders
 
 
 install: install-bin install-ext install-config install-man

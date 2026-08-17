@@ -28,6 +28,7 @@ static char rcsid[] = "$Id$";
 #include "xymonnet.h"
 #include "contest.h"
 #include "httpcookies.h"
+#include "httpheaders.h"
 #include "httptest.h"
 #include "dns.h"
 
@@ -592,6 +593,7 @@ void add_http_test(testitem_t *t)
 		char useragent[100];
 		char *browser = NULL;
 		char *httpheaders = NULL;
+		char *httpheaderfile = NULL;
 
 		if (hinfo) browser = xmh_item(hinfo, XMH_BROWSER);
 
@@ -608,6 +610,27 @@ void add_http_test(testitem_t *t)
 		if (httpheaders) {
 			addtobuffer(httprequest, httpheaders);
 			addtobuffer(httprequest, "\r\n");
+		}
+
+		if (hinfo) httpheaderfile = xmh_item(hinfo, XMH_HTTPHEADERFILE);
+		if (httpheaderfile) {
+			char errmsg[PATH_MAX + 100];
+			char *filename = expand_env(httpheaderfile);
+			char *fileheaders = load_http_headers(filename, errmsg, sizeof(errmsg));
+
+			httptest->hasheaderfile = 1;
+			if (fileheaders == NULL) {
+				errprintf("%s\n", errmsg);
+				httptest->tcptest = (tcptest_t *)calloc(1, sizeof(tcptest_t));
+				httptest->tcptest->errcode = CONTEST_EIO;
+				httptest->tcptest->priv = httptest;
+				freestrbuffer(httprequest);
+				return;
+			}
+
+			addtobuffer(httprequest, fileheaders);
+			addtobuffer(httprequest, "\r\n");
+			free(fileheaders);
 		}
 	}
 	if (httptest->weburl.desturl->auth) {

@@ -163,6 +163,7 @@ typedef struct {
 
 	char		*url;			/* URL to request, stripped of configuration artefacts */
 	int		parsestatus;
+	int		hasheaderfile;		/* Request includes headers loaded from a protected file */
 	weburl_t	weburl;
 
 	int		gotheaders;

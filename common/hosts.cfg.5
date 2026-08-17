@@ -1444,6 +1444,19 @@ The string should be encased in quotes, like \fBhttphdr="X-Requested-With: XMLHt
 Newlines can be included, however the string MUST NOT end with a newline
 as that may cause premature ending of the headers sent.
 
+.IP "\fBhttphdrfile\fR=\fIFILENAME\fR"
+Load additional HTTP request headers from a file instead of storing them
+in hosts.cfg. This is intended for authentication headers containing bearer
+tokens, API keys, or other secrets. It is a host-wide configuration and the
+headers are added to all URLs on that host. Environment variables in FILENAME
+are expanded, e.g. \fBhttphdrfile="$XYMONHOME/etc/httpheaders/example-api"\fR.
+.br
+The file contains one complete HTTP header per line, for example
+\fBAuthorization: Bearer secret-token\fR. It must be a non-empty regular file,
+no larger than 64 KiB, and must not be accessible by group or others. If the
+file cannot be loaded or is invalid, the HTTP test fails without sending a
+request. The file contents are never included in status or diagnostic output.
+
 .SH LDAP (DIRECTORY SERVER) TESTS
 .IP "\fBldap\fR"
 .IP "\fBldaps\fR"

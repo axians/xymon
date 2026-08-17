@@ -1607,7 +1607,10 @@ int main(int argc, char *argv[])
 						printf("TCP connection goes to %s:%d\n",
 							inet_ntoa(httptest->tcptest->addr.sin_addr),
 							ntohs(httptest->tcptest->addr.sin_port));
-						printf("Request:\n%s\n", httptest->tcptest->sendtxt);
+						if (!httptest->hasheaderfile)
+							printf("Request:\n%s\n", httptest->tcptest->sendtxt);
+						else
+							printf("Request omitted because it contains protected headers\n");
 					}
 				}
 				else if (strncmp(argp, "dns=", 4) == 0) {
