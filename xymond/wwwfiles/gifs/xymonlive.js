@@ -11,6 +11,8 @@
 	var searchFilter = "";
 	var regexFilter = null;
 	var regexScope = "either";
+	var showColorIcons = false;
+	var assetBase = new URL(".", document.currentScript.src);
 	var colors = ["red", "yellow", "purple", "blue"];
 	var body = document.getElementById("status-body");
 	var empty = document.getElementById("empty");
@@ -58,6 +60,21 @@
 		return regexFilter.test(item.host) || regexFilter.test(item.test);
 	}
 
+	function colorDisplay(color) {
+		if (showColorIcons) {
+			var image = document.createElement("img");
+			image.className = "color-icon";
+			image.src = new URL("static/" + color + ".gif", assetBase).href;
+			image.alt = color;
+			image.title = color;
+			return image;
+		}
+		var label = document.createElement("b");
+		label.className = color;
+		label.textContent = color;
+		return label;
+	}
+
 	function renderEvents() {
 		var list = document.getElementById("events");
 		list.replaceChildren();
@@ -69,8 +86,6 @@
 			var text = document.createElement("p");
 			var host = document.createElement("a");
 			var service = document.createElement("a");
-			var previousColor = document.createElement("b");
-			var color = document.createElement("b");
 			time.dateTime = new Date(event.time * 1000).toISOString();
 			compactTime.className = "compact-time";
 			compactTime.textContent = dateTime(event.time);
@@ -83,11 +98,7 @@
 			service.href = event.serviceUrl;
 			service.textContent = event.test;
 			text.append(host, document.createTextNode(" / "), service, document.createTextNode(" "));
-			previousColor.className = event.previousColor;
-			previousColor.textContent = event.previousColor;
-			color.className = event.color;
-			color.textContent = event.color;
-			text.append(previousColor, document.createTextNode(" -> "), color);
+			text.append(colorDisplay(event.previousColor), document.createTextNode(" -> "), colorDisplay(event.color));
 			item.append(time, text);
 			list.append(item);
 		});
@@ -327,6 +338,18 @@
 		document.getElementById("connection-text").textContent = paused ? "Paused" : "Live";
 		if (!paused) refresh();
 	});
+	document.getElementById("color-display").addEventListener("click", function (event) {
+		showColorIcons = !showColorIcons;
+		event.currentTarget.setAttribute("aria-pressed", String(showColorIcons));
+		event.currentTarget.textContent = showColorIcons ? "Text" : "GIFs";
+		event.currentTarget.title = showColorIcons ? "Show colors as text" : "Show colors as static GIFs";
+		try { sessionStorage.setItem("xymonlive-color-icons", showColorIcons ? "1" : "0"); } catch (failure) {}
+		renderEvents();
+	});
+	try { showColorIcons = sessionStorage.getItem("xymonlive-color-icons") === "1"; } catch (failure) {}
+	document.getElementById("color-display").setAttribute("aria-pressed", String(showColorIcons));
+	document.getElementById("color-display").textContent = showColorIcons ? "Text" : "GIFs";
+	document.getElementById("color-display").title = showColorIcons ? "Show colors as text" : "Show colors as static GIFs";
 	document.getElementById("clear").addEventListener("click", function () { events = []; renderEvents(); });
 	document.querySelectorAll(".fold").forEach(function (button) {
 		var folded = false;

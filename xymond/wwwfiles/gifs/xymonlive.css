@@ -135,6 +135,7 @@ aside { max-height: 650px; overflow: hidden; container-type: inline-size; }
 .transition .purple { color: var(--purple); }
 .transition .blue { color: var(--blue); }
 .transition .green { color: var(--green); }
+.transition .color-icon { width: 16px; height: 16px; object-fit: contain; vertical-align: middle; }
 
 @media (min-width: 701px) {
 	#events li { grid-template-columns: 142px 1fr; }

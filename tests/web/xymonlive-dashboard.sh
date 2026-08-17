@@ -87,6 +87,14 @@ assert_contains 'id=\"layout\"' "$source_text" \
 	"dashboard must provide a panel layout selector"
 assert_contains '<h2>Recent changes</h2>' "$source_text" \
 	"dashboard must accurately name its bounded transition list"
+assert_contains 'id=\"color-display\"' "$source_text" \
+	"recent changes must provide a text/static-GIF toggle"
+assert_contains 'image.src = new URL("static/" + color + ".gif", assetBase).href' "$js_text" \
+	"color icons must use Xymon's packaged non-animated GIF directory"
+assert_contains 'sessionStorage.setItem("xymonlive-color-icons"' "$js_text" \
+	"the color display choice must survive a page reload"
+assert_contains '.transition .color-icon { width: 16px; height: 16px;' "$css_text" \
+	"static color GIFs must have stable dimensions"
 assert_not_contains 'Observed changes' "$source_text" \
 	"dashboard must not imply that recent transitions are complete history"
 assert_contains 'sessionStorage.setItem("xymonlive-layout", layout)' "$js_text" \
