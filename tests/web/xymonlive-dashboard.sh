@@ -182,8 +182,14 @@ assert_contains '#pause { align-self: end; }' "$css_text" \
 	"Pause must align with the mobile Rows select instead of its label"
 assert_not_contains 'min-width: 320px' "$css_text" \
 	"the page must not force horizontal scrolling inside a 320px viewport"
-assert_contains 'document.getElementById("updated").textContent = dateTime(payload.time)' "$js_text" \
-	"the Live timestamp must include its YYYY-MM-DD date"
+assert_contains 'title=\"Local browser time\"' "$source_text" \
+	"the Live clock must identify which time it displays"
+assert_contains 'display.textContent = dateTime(now.getTime() / 1000)' "$js_text" \
+	"the Live clock must display the current browser date and time"
+assert_contains 'setTimeout(updateClock, 1000 - now.getMilliseconds())' "$js_text" \
+	"the Live clock must advance on aligned second boundaries"
+assert_not_contains 'dateTime(payload.time)' "$js_text" \
+	"the Live clock must not freeze on the most recent event time"
 
 assert_contains '[xymonlive-websocket]' "$tasks_text" \
 	"xymonlaunch must start the transition gateway"

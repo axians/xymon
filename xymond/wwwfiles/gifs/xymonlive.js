@@ -28,6 +28,13 @@
 		var part = function (value) { return String(value).padStart(2, "0"); };
 		return date.getFullYear() + "-" + part(date.getMonth() + 1) + "-" + part(date.getDate()) + " " + clock(epoch);
 	}
+	function updateClock() {
+		var now = new Date();
+		var display = document.getElementById("updated");
+		display.dateTime = now.toISOString();
+		display.textContent = dateTime(now.getTime() / 1000);
+		setTimeout(updateClock, 1000 - now.getMilliseconds());
+	}
 	function statusUrl(host, test) {
 		return root.dataset.cgiUrl + "/svcstatus.sh?HOST=" + encodeURIComponent(host) + "&SERVICE=" + encodeURIComponent(test);
 	}
@@ -181,7 +188,6 @@
 			}
 			if (payload.type === "change" && generation) {
 				addEvent(payload);
-				document.getElementById("updated").textContent = dateTime(payload.time);
 			}
 		});
 		connection.addEventListener("close", function () {
@@ -302,6 +308,7 @@
 
 	updateRegexFilter();
 	renderEvents();
+	updateClock();
 	connect();
 	scheduleAgeRefresh();
 }());
