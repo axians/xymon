@@ -29,7 +29,7 @@
 #define EVENT_RING_SIZE 500
 #define OUTPUT_SIZE 262144
 #define HANDSHAKE_TIMEOUT 10
-#define XYMOND_STALE_TIMEOUT 90
+#define XYMOND_STALE_TIMEOUT 65
 
 typedef struct {
 	char *text;

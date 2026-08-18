@@ -17,8 +17,8 @@ assert_contains 'posttochannel(stachgchn, "heartbeat"' "$source_text" \
 assert_contains 'nextliveheartbeat = now + 30' "$source_text" \
 	"xymond WebSocket heartbeats must run every 30 seconds"
 gateway_text=$(cat "$ROOT/xymond/xymond_websocket.c")
-assert_contains '#define XYMOND_STALE_TIMEOUT 90' "$gateway_text" \
-	"the gateway must identify a silent xymond within 90 seconds"
+assert_contains '#define XYMOND_STALE_TIMEOUT 65' "$gateway_text" \
+	"the gateway must identify a silent xymond within 65 seconds"
 require_cc
 work=$(mktempdir)
 "$CC" -std=c99 -Wall -Wextra -Werror -o "$work/xymond-websocket-harness" \
