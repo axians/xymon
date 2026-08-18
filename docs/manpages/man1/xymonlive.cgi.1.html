@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link rel="stylesheet" href="../mandoc.css" type="text/css" media="all"/>
+  <title>XYMONLIVE.CGI(1)</title>
+</head>
+<body>
+<h1 class="head-name">XYMONLIVE.CGI</h1>
+Section: User Commands (1)<br/>Updated: Version 4.3.31<br/><a href="#INDEX">Index</a>
+<a href="../index.html">Return to Main Contents</a><hr/>
+
+<div class="manual-text">
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="NAME"><a class="permalink" href="#NAME">NAME</a></h1>
+<p class="Pp">xymonlive.cgi - live browser view of Xymon status changes</p>
+</section>
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="SYNOPSIS"><a class="permalink" href="#SYNOPSIS">SYNOPSIS</a></h1>
+<p class="Pp"><b>xymonlive.cgi [options]</b></p>
+</section>
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="DESCRIPTION"><a class="permalink" href="#DESCRIPTION">DESCRIPTION</a></h1>
+<p class="Pp"><b>xymonlive.cgi</b> serves an HTML5 dashboard that receives
+    actual status transitions from <b>xymond_websocket</b>(8). It does not poll
+    the current status board and does not read history or allevents files. The
+    dashboard displays only recent changes.</p>
+<p class="Pp">The gateway keeps a bounded transition ring in memory. A newly
+    connected or reconnected browser receives that ring and then receives new
+    transitions as they happen. The browser deduplicates replayed entries by
+    gateway generation and sequence number.</p>
+<p class="Pp">The ring is not a durable history. It starts empty when the
+    gateway restarts; browsers detect the new generation and discard entries
+    from the previous process. No checkpoint is read or written.</p>
+<p class="Pp">The client can filter events by host, service, or message text and
+    by event type: status transition, disable comment, or acknowledgement
+    comment. It keeps up to 500 events in memory and can render 25, 50, 100,
+    250, or all 500 rows. Status-message text can be hidden without removing it
+    from client-side filtering.</p>
+<p class="Pp">The webserver must proxy <b>$XYMONSERVERCGIURL/xymonlive-ws</b> to
+    the loopback gateway. The generated Apache configuration includes guarded
+    proxy directives; enable the Apache proxy and proxy_wstunnel modules to use
+    them.</p>
+<p class="Pp">An upgrade preserves an existing locally managed
+    xymon-apache.conf. Merge the Xymon Live ProxyPass directives from the
+    generated configuration into that file when upgrading an existing
+    installation.</p>
+</section>
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="OPTIONS"><a class="permalink" href="#OPTIONS">OPTIONS</a></h1>
+<dl class="Bl-tag">
+  <dt id="env"><a class="permalink" href="#env"><b>--env=FILENAME</b></a></dt>
+  <dd>Load the Xymon environment from FILENAME.</dd>
+  <dt id="area"><a class="permalink" href="#area"><b>--area=NAME</b></a></dt>
+  <dd>Load environment settings for the named area.</dd>
+  <dt id="debug"><a class="permalink" href="#debug"><b>--debug</b></a></dt>
+  <dd>Enable debugging output.</dd>
+</dl>
+</section>
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="SEE_ALSO"><a class="permalink" href="#SEE_ALSO">SEE
+  ALSO</a></h1>
+<p class="Pp"><a href="../man1/xymon.1.html">xymon</a>(1), <a href="../man8/xymond.8.html">xymond</a>(8), <a href="../man8/xymond_channel.8.html">xymond_channel</a>(8), <a href="../man8/xymond_websocket.8.html">xymond_websocket</a>(8)</p>
+</section>
+<p>&#160;</p>
+<h1 class="Sh" id="INDEX"><a class="permalink" href="#INDEX">Index</a></h1>
+<dl class="Bl-tag">
+<dt><a href="#NAME">NAME</a></dt>
+<dt><a href="#SYNOPSIS">SYNOPSIS</a></dt>
+<dt><a href="#DESCRIPTION">DESCRIPTION</a></dt>
+<dt><a href="#OPTIONS">OPTIONS</a></dt>
+<dt><a href="#SEE_ALSO">SEE ALSO</a></dt>
+</dl>
+</div>
+<hr/>
+This document was created by mandoc, using the manual pages.
+
+</body>
+</html>

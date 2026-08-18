@@ -71,4 +71,6 @@ CGI_TOPCHANGE_OPTS="--env=$XYMONENV --top"
 CGI_USERADM_OPTS="--env=$XYMONENV"
 # appfeed options
 CGI_APPFEED_OPTS="--env=$XYMONENV"
+# xymonlive options
+CGI_XYMONLIVE_OPTS="--env=$XYMONENV"
 

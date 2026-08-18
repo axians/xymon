@@ -17,6 +17,13 @@ Alias @XYMONHOSTURL@  "@INSTALLWWWDIR@"
     Require all granted
 </Directory>
 
+# Enable mod_proxy and mod_proxy_wstunnel to provide the live transition feed.
+<IfModule proxy_wstunnel_module>
+    ProxyPreserveHost On
+    ProxyPass @XYMONCGIURL@/xymonlive-ws ws://127.0.0.1:@XYMONLIVEWEBSOCKETPORT@/xymonlive
+    ProxyPassReverse @XYMONCGIURL@/xymonlive-ws ws://127.0.0.1:@XYMONLIVEWEBSOCKETPORT@/xymonlive
+</IfModule>
+
 ScriptAlias @XYMONCGIURL@/ "@CGIDIR@/"
 <Directory "@CGIDIR@">
     AllowOverride None

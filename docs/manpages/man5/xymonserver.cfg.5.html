@@ -382,7 +382,10 @@ Section: File Formats (5)<br/>Updated: Version 4.3.30: 4 Sep 2019<br/><a href="#
   </dd>
   <dt id="XYMONWEBHOST"><a class="permalink" href="#XYMONWEBHOST"><b>XYMONWEBHOST</b></a></dt>
   <dd>Initial part of the Xymon URL, including just the protocol and the
-      hostname, e.g. &quot;http://www.foo.com&quot;
+      hostname, e.g. &quot;http://www.foo.com&quot;. The packaged Xymon Live
+      WebSocket task also uses this complete origin to validate browser
+      connections, so set the scheme and any non-default port to the externally
+      visible values.
     <p class="Pp"></p>
   </dd>
   <dt id="XYMONWEBHOSTURL"><a class="permalink" href="#XYMONWEBHOSTURL"><b>XYMONWEBHOSTURL</b></a></dt>
@@ -505,6 +508,11 @@ Section: File Formats (5)<br/>Updated: Version 4.3.30: 4 Sep 2019<br/><a href="#
   <dt id="XYMONDPORT"><a class="permalink" href="#XYMONDPORT"><b>XYMONDPORT</b></a></dt>
   <dd>The portnumber for used to contact the <i><a href="../man8/xymond.8.html">xymond</a>(8)</i> service. Used by
       clients and the tools that perform network tests. Default: 1984.
+    <p class="Pp"></p>
+  </dd>
+  <dt id="XYMONLIVEWEBSOCKETPORT"><a class="permalink" href="#XYMONLIVEWEBSOCKETPORT"><b>XYMONLIVEWEBSOCKETPORT</b></a></dt>
+  <dd>The loopback TCP port where <i><a href="../man8/xymond_websocket.8.html">xymond_websocket</a>(8)</i> accepts proxied
+      WebSocket connections for Xymon Live. Default: 1985.
     <p class="Pp"></p>
   </dd>
   <dt id="MAXMSGSPERCOMBO"><a class="permalink" href="#MAXMSGSPERCOMBO"><b>MAXMSGSPERCOMBO</b></a></dt>

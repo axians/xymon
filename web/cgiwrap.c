@@ -111,6 +111,7 @@ int main(int argc, char **argv)
 	else if (strcmp(cgipgm, "topchanges.cgi") == 0)          { cgipgm = "eventlog.cgi";     addoptl("CGI_TOPCHANGE_OPTS");   }
 	else if (strcmp(cgipgm, "useradm.cgi") == 0)             {                              addoptl("CGI_USERADM_OPTS");     }
 	else if (strcmp(cgipgm, "chpasswd.cgi") == 0)            {                              addoptl("CGI_CHPASSWD_OPTS");    }
+	else if (strcmp(cgipgm, "xymonlive.cgi") == 0)            {                              addoptl("CGI_XYMONLIVE_OPTS");   }
 	else {
 		/* Make sure we're being called as a CGI */
                 if ((strlen(cgipgm) <= 4) || (strcmp(cgipgm+strlen(cgipgm)-4, ".cgi") != 0)) {
