@@ -12,6 +12,13 @@ assert_contains 'posttochannel(stachgchn, "ack", log->ackmsg' "$source_text" \
 	"acknowledgements must reach the WebSocket event feed"
 assert_contains 'posttochannel(stachgchn, "disable"' "$source_text" \
 	"disable comments must reach the WebSocket event feed"
+assert_contains 'posttochannel(stachgchn, "heartbeat"' "$source_text" \
+	"xymond must heartbeat the WebSocket event feed"
+assert_contains 'nextliveheartbeat = now + 30' "$source_text" \
+	"xymond WebSocket heartbeats must run every 30 seconds"
+gateway_text=$(cat "$ROOT/xymond/xymond_websocket.c")
+assert_contains '#define XYMOND_STALE_TIMEOUT 90' "$gateway_text" \
+	"the gateway must identify a silent xymond within 90 seconds"
 require_cc
 work=$(mktempdir)
 "$CC" -std=c99 -Wall -Wextra -Werror -o "$work/xymond-websocket-harness" \

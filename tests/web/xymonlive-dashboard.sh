@@ -75,7 +75,7 @@ assert_not_contains 'sendmessage(' "$source_text" \
 assert_not_contains 'cachefn' "$source_text" \
 	"the removed snapshot endpoint must not leave cache state behind"
 
-assert_contains 'socket = new WebSocket(websocketUrl())' "$js_text" \
+assert_contains 'connection = new WebSocket(websocketUrl())' "$js_text" \
 	"the dashboard must consume transitions over WebSocket"
 assert_contains 'if (paused || socket) return' "$js_text" \
 	"reconnects must wait for the previous socket close event"
@@ -83,6 +83,20 @@ assert_contains 'location.protocol === "https:" ? "wss:" : "ws:"' "$js_text" \
 	"HTTPS dashboards must use secure WebSockets"
 assert_contains 'reconnectDelay = Math.min(reconnectDelay * 2, 30000)' "$js_text" \
 	"disconnected browsers must reconnect with bounded backoff"
+assert_contains 'armConnectionTimer(connection, 15000)' "$js_text" \
+	"browsers must time out stalled WebSocket handshakes"
+assert_contains 'armConnectionTimer(connection, 45000)' "$js_text" \
+	"browsers must detect a stalled open gateway"
+assert_contains 'if (socket !== connection) return' "$js_text" \
+	"stale socket callbacks must not overwrite the current connection state"
+assert_contains 'if (payload.type === "heartbeat") return' "$js_text" \
+	"application heartbeats must refresh liveness without rendering events"
+assert_contains 'disconnectLabel = "Xymond unavailable"' "$js_text" \
+	"xymond channel loss must have a distinct browser status"
+assert_contains 'payload.type === "xymond" && payload.state === "alive"' "$js_text" \
+	"xymond heartbeat recovery must restore Live status"
+assert_contains 'if (disconnectLabel === "Xymond unavailable") setConnection("offline", disconnectLabel)' "$js_text" \
+	"xymond-unavailable status must remain visible during reconnect attempts"
 assert_contains 'generation !== payload.generation' "$js_text" \
 	"a gateway restart must reset stale browser history"
 assert_contains 'generation + ":" + event.sequence' "$js_text" \

@@ -230,6 +230,7 @@ static int read_frame(int fd, char payload[FRAME_SIZE])
 	unsigned char opcode;
 
 	while (read_opcode_frame(fd, &opcode, payload) == 0) {
+		if ((opcode == 0x1) && (strcmp(payload, "{\"type\":\"heartbeat\"}") == 0)) continue;
 		if (opcode == 0x1) return 0;
 		if ((opcode == 0x9) &&
 		    (send_masked_data(fd, 0x8A, (unsigned char *)payload, strlen(payload)) == 0)) continue;
@@ -467,6 +468,15 @@ int main(int argc, char **argv)
 	invalid = -1;
 	stage = "handshake timeout";
 	if (incomplete_handshake_expires(port) == -1) goto done;
+	stage = "xymond unavailable";
+	close(inputpipe[1]);
+	inputpipe[1] = -1;
+	if ((read_frame(first, replay) == -1) ||
+	    !contains(replay, "\"type\":\"xymond\"") ||
+	    !contains(replay, "\"state\":\"unavailable\"") ||
+	    (expect_closed(first) == -1)) goto done;
+	close(first);
+	first = -1;
 	result = 0;
 
 done:
@@ -474,7 +484,7 @@ done:
 	if (second >= 0) close(second);
 	if (third >= 0) close(third);
 	if (invalid >= 0) close(invalid);
-	close(inputpipe[1]);
+	if (inputpipe[1] >= 0) close(inputpipe[1]);
 	stop_child(child);
 	if (result != 0) fprintf(stderr, "failed stage: %s\n", stage);
 	return result;

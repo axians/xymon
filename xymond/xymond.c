@@ -225,6 +225,7 @@ enum droprencmd_t { CMD_DROPHOST, CMD_DROPTEST, CMD_RENAMEHOST, CMD_RENAMETEST, 
 static volatile int running = 1;
 static volatile int reloadconfig = 0;
 static volatile time_t nextcheckpoint = 0;
+static volatile time_t nextliveheartbeat = 0;
 static volatile int dologswitch = 0;
 static volatile int gotalarm = 0;
 
@@ -6053,6 +6054,7 @@ int main(int argc, char *argv[])
 	}
 
 	nextcheckpoint = getcurrenttime(NULL) + checkpointinterval;
+	nextliveheartbeat = getcurrenttime(NULL) + 30;
 	nextpurpleupdate = getcurrenttime(NULL) + 600;	/* Wait 10 minutes the first time */
 	last_stats_time = getcurrenttime(NULL);	/* delay sending of the first status report until we're fully running */
 
@@ -6265,6 +6267,11 @@ int main(int argc, char *argv[])
 		if (do_purples && (now >= nextpurpleupdate)) {
 			nextpurpleupdate = getcurrenttime(NULL) + purplecheckinterval;
 			check_purple_status();
+		}
+
+		if (now >= nextliveheartbeat) {
+			posttochannel(stachgchn, "heartbeat", NULL, "xymond", NULL, NULL, "");
+			nextliveheartbeat = now + 30;
 		}
 
 		if ((last_stats_time + statsinterval) <= now) {

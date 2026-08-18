@@ -7,7 +7,9 @@
 	var generation = null;
 	var socket = null;
 	var reconnectTimer = null;
+	var connectionTimer = null;
 	var reconnectDelay = 1000;
+	var disconnectLabel = "Disconnected";
 	var paused = false;
 	var regexFilter = null;
 	var regexScope = "any";
@@ -105,6 +107,20 @@
 		document.getElementById("connection-dot").className = state;
 		document.getElementById("connection-text").textContent = label;
 	}
+	function clearConnectionTimer() {
+		if (connectionTimer) clearTimeout(connectionTimer);
+		connectionTimer = null;
+	}
+	function armConnectionTimer(connection, delay) {
+		clearConnectionTimer();
+		connectionTimer = setTimeout(function () {
+			if (paused || socket !== connection) return;
+			socket = null;
+			setConnection("offline", "Disconnected");
+			connection.close();
+			scheduleReconnect();
+		}, delay);
+	}
 	function scheduleReconnect() {
 		if (paused || reconnectTimer) return;
 		reconnectTimer = setTimeout(function () {
@@ -120,18 +136,40 @@
 		}, 30000);
 	}
 	function connect() {
+		var connection;
 		if (paused || socket) return;
-		setConnection("", "Connecting");
-		socket = new WebSocket(websocketUrl());
-		socket.addEventListener("open", function () {
+		if (disconnectLabel === "Xymond unavailable") setConnection("offline", disconnectLabel);
+		else setConnection("", "Connecting");
+		connection = new WebSocket(websocketUrl());
+		socket = connection;
+		armConnectionTimer(connection, 15000);
+		connection.addEventListener("open", function () {
+			if (socket !== connection) return;
+			if (reconnectTimer) clearTimeout(reconnectTimer);
+			reconnectTimer = null;
 			reconnectDelay = 1000;
-			setConnection("online", "Live");
+			armConnectionTimer(connection, 45000);
 		});
-		socket.addEventListener("message", function (message) {
+		connection.addEventListener("message", function (message) {
 			var payload;
+			if (socket !== connection) return;
+			armConnectionTimer(connection, 45000);
 			try { payload = JSON.parse(message.data); }
 			catch (failure) { return; }
+			if (payload.type === "heartbeat") return;
+			if (payload.type === "xymond" && payload.state === "unavailable") {
+				disconnectLabel = "Xymond unavailable";
+				setConnection("offline", disconnectLabel);
+				return;
+			}
+			if (payload.type === "xymond" && payload.state === "alive") {
+				disconnectLabel = "Disconnected";
+				setConnection("online", "Live");
+				return;
+			}
 			if (payload.type === "hello") {
+				disconnectLabel = "Disconnected";
+				setConnection("online", "Live");
 				if (generation && generation !== payload.generation) {
 					events = [];
 					seen.clear();
@@ -146,11 +184,13 @@
 				document.getElementById("updated").textContent = dateTime(payload.time);
 			}
 		});
-		socket.addEventListener("close", function () {
+		connection.addEventListener("close", function () {
+			if (socket !== connection) return;
+			clearConnectionTimer();
 			socket = null;
-			if (!paused) { setConnection("offline", "Disconnected"); scheduleReconnect(); }
+			if (!paused) { setConnection("offline", disconnectLabel); scheduleReconnect(); }
 		});
-		socket.addEventListener("error", function () { socket.close(); });
+		connection.addEventListener("error", function () { connection.close(); });
 	}
 	function updateRegexFilter() {
 		var input = document.getElementById("regex-filter");
@@ -216,13 +256,17 @@
 		renderEvents();
 	});
 	document.getElementById("pause").addEventListener("click", function (event) {
+		var connection;
 		paused = !paused;
 		event.currentTarget.textContent = paused ? "Resume" : "Pause";
 		event.currentTarget.title = paused ? "Resume live updates and reconnect" : "Pause live updates and reconnect attempts";
 		if (paused) {
 			clearTimeout(reconnectTimer);
 			reconnectTimer = null;
-			if (socket) socket.close();
+			clearConnectionTimer();
+			connection = socket;
+			socket = null;
+			if (connection) connection.close();
 			setConnection("", "Paused");
 		}
 		else connect();

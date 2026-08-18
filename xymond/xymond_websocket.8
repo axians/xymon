@@ -44,5 +44,13 @@ new colors, transition time, sequence number, and up to 511 bytes from the
 first human-readable line of the status message body. Disable and
 acknowledgement actions are sent as distinct event types carrying their
 comments. Idle connections receive WebSocket ping frames.
+The gateway also sends heartbeat JSON objects so browsers can detect a stalled
+connection even when the TCP socket remains open.
+If its xymond status-change channel disappears, the gateway sends an explicit
+xymond-unavailable object before closing browser connections.
+Xymond also publishes a heartbeat marker every 30 seconds. If the gateway sees
+no channel activity for 90 seconds, it reports xymond unavailable while keeping
+the browser connection alive, and reports live again when channel activity
+resumes.
 .SH SEE ALSO
 xymonlive.cgi(1), xymond(8), xymond_channel(8)

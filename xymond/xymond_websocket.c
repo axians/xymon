@@ -29,6 +29,7 @@
 #define EVENT_RING_SIZE 500
 #define OUTPUT_SIZE 262144
 #define HANDSHAKE_TIMEOUT 10
+#define XYMOND_STALE_TIMEOUT 90
 
 typedef struct {
 	char *text;
@@ -293,6 +294,17 @@ static int append_replay(websocket_client_t *client, websocket_event_t *event)
 	client->replay[client->replay_count] = event;
 	client->replay_count++;
 	return 0;
+}
+
+static void discard_replay(websocket_client_t *client)
+{
+	int index;
+
+	for (index = client->replay_next; index < client->replay_count; index++) {
+		release_event(client->replay[index]);
+		client->replay[index] = NULL;
+	}
+	client->replay_count = client->replay_next = 0;
 }
 
 static int valid_utf8(const unsigned char *text, size_t length)
@@ -585,7 +597,11 @@ static void channel_reader(int outputfd)
 
 	while ((msg = get_xymond_message(C_STACHG, "xymond_websocket", &sequence, NULL)) != NULL) {
 		dbgprintf("xymond_websocket: received channel sequence %d\n", sequence);
-		if (format_event(msg, sequence, event) == 0) {
+		if (strncmp(msg, "@@heartbeat", 11) == 0) {
+			static const char heartbeat[] = "{\"type\":\"xymond\",\"state\":\"alive\"}\n";
+			if (write_fd_all(outputfd, heartbeat, sizeof(heartbeat) - 1) == -1) break;
+		}
+		else if (format_event(msg, sequence, event) == 0) {
 			if ((write_fd_all(outputfd, event, strlen(event)) == -1) || (write_fd_all(outputfd, "\n", 1) == -1)) break;
 		}
 		else dbgprintf("xymond_websocket: ignored malformed channel message\n");
@@ -609,6 +625,9 @@ int main(int argc, char **argv)
 	char eventbuffer[EVENT_SIZE * 2];
 	size_t eventused = 0;
 	char generation[64];
+	int channel_down = 0;
+	int xymond_stale = 0;
+	time_t last_xymond_response = time(NULL);
 	int index;
 
 	for (index = 1; index < argc; index++) {
@@ -658,8 +677,8 @@ int main(int argc, char **argv)
 
 		FD_ZERO(&readfds);
 		FD_ZERO(&writefds);
-		FD_SET(listener, &readfds);
-		FD_SET(eventpipe[0], &readfds);
+		if (listener >= 0) FD_SET(listener, &readfds);
+		if (eventpipe[0] >= 0) FD_SET(eventpipe[0], &readfds);
 		for (index = 0; index < MAX_CLIENTS; index++) {
 			if (clients[index].fd >= 0) {
 				if (!clients[index].close_after_write) FD_SET(clients[index].fd, &readfds);
@@ -673,13 +692,23 @@ int main(int argc, char **argv)
 		if ((ready < 0) && (errno == EINTR)) continue;
 		if (ready < 0) break;
 		now = time(NULL);
+		if (!channel_down && !xymond_stale && ((now - last_xymond_response) >= XYMOND_STALE_TIMEOUT)) {
+			xymond_stale = 1;
+			for (index = 0; index < MAX_CLIENTS; index++) {
+				if (clients[index].upgraded &&
+				    (queue_text(&clients[index], "{\"type\":\"xymond\",\"state\":\"unavailable\"}") == -1)) {
+					close_client(&clients[index]);
+				}
+			}
+		}
 		for (index = 0; index < MAX_CLIENTS; index++) {
 			websocket_client_t *client = &clients[index];
 			if ((client->fd >= 0) && !client->upgraded && ((now - client->last_response) >= HANDSHAKE_TIMEOUT)) close_client(client);
 			else if (!client->upgraded) continue;
 			else if (client->awaiting_pong && ((now - client->last_response) >= 60)) close_client(client);
 			else if (!client->awaiting_pong && ((now - client->last_response) >= 30)) {
-				if (queue_frame(client, 0x9, "", 0) == -1) close_client(client);
+				if ((queue_text(client, "{\"type\":\"heartbeat\"}") == -1) ||
+				    (queue_frame(client, 0x9, "", 0) == -1)) close_client(client);
 				else client->awaiting_pong = 1;
 			}
 		}
@@ -693,7 +722,7 @@ int main(int argc, char **argv)
 			else if (client->close_after_write && (client->output_used == 0)) close_client(client);
 		}
 
-		if (FD_ISSET(listener, &readfds)) {
+		if ((listener >= 0) && FD_ISSET(listener, &readfds)) {
 			int clientfd = accept(listener, NULL, NULL);
 			if (clientfd >= 0) {
 				for (index = 0; (index < MAX_CLIENTS) && (clients[index].fd >= 0); index++) ;
@@ -709,9 +738,24 @@ int main(int argc, char **argv)
 			}
 		}
 
-		if (FD_ISSET(eventpipe[0], &readfds)) {
+		if ((eventpipe[0] >= 0) && FD_ISSET(eventpipe[0], &readfds)) {
 			ssize_t count = read(eventpipe[0], eventbuffer + eventused, sizeof(eventbuffer) - eventused - 1);
-			if (count <= 0) running = 0;
+			if (count <= 0) {
+				close(eventpipe[0]);
+				eventpipe[0] = -1;
+				close(listener);
+				listener = -1;
+				channel_down = 1;
+				for (index = 0; index < MAX_CLIENTS; index++) {
+					if (clients[index].fd < 0) continue;
+					discard_replay(&clients[index]);
+					if (!clients[index].upgraded ||
+					    (queue_text(&clients[index], "{\"type\":\"xymond\",\"state\":\"unavailable\"}") == -1)) {
+						close_client(&clients[index]);
+					}
+					else clients[index].close_after_write = 1;
+				}
+			}
 			else {
 				char *line;
 				char *newline;
@@ -722,6 +766,26 @@ int main(int argc, char **argv)
 					int ringpos;
 					websocket_event_t *event;
 					*newline = '\0';
+					last_xymond_response = now;
+					if (xymond_stale &&
+					    (strcmp(line, "{\"type\":\"xymond\",\"state\":\"alive\"}") != 0)) {
+						xymond_stale = 0;
+						for (index = 0; index < MAX_CLIENTS; index++) {
+							if (clients[index].upgraded &&
+							    (queue_text(&clients[index], "{\"type\":\"xymond\",\"state\":\"alive\"}") == -1)) {
+								close_client(&clients[index]);
+							}
+						}
+					}
+					if (strcmp(line, "{\"type\":\"xymond\",\"state\":\"alive\"}") == 0) {
+						xymond_stale = 0;
+						for (index = 0; index < MAX_CLIENTS; index++) {
+							if (clients[index].upgraded &&
+							    (queue_text(&clients[index], line) == -1)) close_client(&clients[index]);
+						}
+						line = newline + 1;
+						continue;
+					}
 					event = new_event(line);
 					if (!event) { running = 0; break; }
 					for (index = 0; index < MAX_CLIENTS; index++) {
@@ -771,10 +835,14 @@ int main(int argc, char **argv)
 				}
 			}
 		}
+		if (channel_down) {
+			for (index = 0; (index < MAX_CLIENTS) && (clients[index].fd < 0); index++) ;
+			if (index == MAX_CLIENTS) running = 0;
+		}
 	}
 
-	close(listener);
-	close(eventpipe[0]);
+	if (listener >= 0) close(listener);
+	if (eventpipe[0] >= 0) close(eventpipe[0]);
 	kill(readerpid, SIGTERM);
 	waitpid(readerpid, NULL, 0);
 	for (index = 0; index < MAX_CLIENTS; index++) close_client(&clients[index]);
