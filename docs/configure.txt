@@ -29,9 +29,9 @@ probe is ambiguous, re-run configure with RRD_CONST_ARGS set explicitly. If
 you compile without running configure, define RRD_CONST_ARGS manually.
 
 
-Checking for PCRE ...
-Found PCRE include files in /usr/include
-Found PCRE libraries in /usr/lib
+Checking for PCRE2 ...
+Compiling with PCRE2 library works OK
+Linking with PCRE2 library works OK
 
 
 Checking for OpenSSL ...

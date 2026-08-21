@@ -15,8 +15,8 @@ do
 	  "--help")
 	  	cat <<EOF
   To configure Xymon, the following options are available:
-     --pcreinclude DIRECTORY  : Specify location of PCRE include files
-     --pcrelib DIRECTORY      : Specify location of PCRE libraries
+	--pcreinclude DIRECTORY  : Specify location of PCRE2 include files
+	--pcrelib DIRECTORY      : Specify location of PCRE2 libraries
      --make /path/to/gnumake  : Specify location of the GNU make program
 
   The script will search a number of standard directories for

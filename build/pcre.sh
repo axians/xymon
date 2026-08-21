@@ -1,4 +1,4 @@
-	echo "Checking for PCRE ..."
+	echo "Checking for PCRE2 ..."
 
 	PCREINC=""
 	PCRELIB=""
@@ -50,26 +50,26 @@
 	OS=`uname -s | sed -e's@/@_@g'` $MAKE -f Makefile.test-pcre clean
 	OS=`uname -s | sed -e's@/@_@g'` PCREINC="$INCOPT" $MAKE -f Makefile.test-pcre test-compile
 	if test $? -eq 0; then
-		echo "Compiling with PCRE library works OK"
+		echo "Compiling with PCRE2 library works OK"
 	else
-		echo "ERROR: Cannot compile using PCRE library."
+		echo "ERROR: Cannot compile using PCRE2 library."
 		PCREOK="NO"
 	fi
 
 	OS=`uname -s | sed -e's@/@_@g'` PCRELIB="$LIBOPT" $MAKE -f Makefile.test-pcre test-link
 	if test $? -eq 0; then
-		echo "Linking with PCRE library works OK"
+		echo "Linking with PCRE2 library works OK"
 	else
-		echo "ERROR: Cannot link with PCRE library."
+		echo "ERROR: Cannot link with PCRE2 library."
 		PCREOK="NO"
 	fi
 	OS=`uname -s | sed -e's@/@_@g'` $MAKE -f Makefile.test-pcre clean
 	cd ..
 
 	if test "$PCREOK" = "NO"; then
-		echo "Missing PCRE include- or library-files. These are REQUIRED for xymond"
-		echo "PCRE can be found at http://www.pcre.org/"
-		echo "If you have PCRE installed, use the \"--pcreinclude DIR\" and \"--pcrelib DIR\""
+		echo "Missing PCRE2 include- or library-files. These are REQUIRED for xymond"
+		echo "PCRE2 can be found at https://www.pcre.org/"
+		echo "If you have PCRE2 installed, use the \"--pcreinclude DIR\" and \"--pcrelib DIR\""
 		echo "options to configure to specify where they are."
 		exit 1
 	fi

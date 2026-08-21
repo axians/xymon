@@ -102,7 +102,7 @@ fi
 if ! grep -q "RRDtool probe failed" "$LOG"; then
 	# configure.server checks a few prerequisites *before* it reaches the
 	# RRD stub: GNU make (it bails with "GNU make is required ...") and a
-	# usable PCRE (build/pcre.sh exits with "Missing PCRE include- or
+	# usable PCRE2 (build/pcre.sh exits with "Missing PCRE2 include- or
 	# library-files ..."). If one of those is absent on this host the run
 	# aborts early and never exercises the RRD path -- that's a missing
 	# precondition, not a #84 regression, so skip rather than false-fail.
@@ -111,7 +111,7 @@ if ! grep -q "RRDtool probe failed" "$LOG"; then
 	if grep -q "GNU make is required" "$LOG"; then
 		skip "GNU make unavailable -- configure aborts before the RRD probe"
 	fi
-	if grep -q "Missing PCRE include- or library-files" "$LOG"; then
+	if grep -q "Missing PCRE2 include- or library-files" "$LOG"; then
 		skip "usable PCRE unavailable -- configure aborts before the RRD probe"
 	fi
 	dump_log
