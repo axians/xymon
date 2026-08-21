@@ -79,15 +79,16 @@ files installed as well. Often these are in packages called "something<em>-dev</
 <ul>
 	<li>PCRE2 - Perl Compatible Regular Expressions, second API - is used
 	for matching text strings. Xymon requires the 8-bit PCRE2 library and
-	development headers (<tt>pcre2.h</tt> and <tt>libpcre2-8</tt>). It is
-	available from <a href="https://www.pcre.org/">https://www.pcre.org/</a>.</li>
+	development headers (<tt>pcre2.h</tt> and <tt>libpcre2-8</tt>), version
+	10.00 or newer. It is available from
+	<a href="https://www.pcre.org/">https://www.pcre.org/</a>.</li>
 
 	<li>RRDtool is a library for handling the Round-Robin Databases used
 	to hold the historical data Xymon gathers. It is available from 
 	<a href="http://www.mrtg.org/rrdtool/">http://www.mrtg.org/rrdtool/</a>.
-	Xymon has been tested with version 1.2, 1.3 and 1.4 of RRDtool, so
-	use one of these - many Linux- and *BSD-systems have pre-packaged
-	versions of it.<br>
+	It is required only for a Xymon server build; client-only builds do not
+	use it. Xymon requires RRDtool 1.2.2 or newer; many Linux- and
+	*BSD-systems have pre-packaged versions of it.<br>
 	Note that RRDtool requires various graphics-libraries. RRDtool 1.2.x uses
 	libpng, newer versions rely on the Cairo graphics library.<br>
 	<em>NetBSD:</em> the pre-built rrdtool package links against the base X11
@@ -246,11 +247,16 @@ for a Xymon server on current systems; use the development package that provides
 
 <h4>Debian and Ubuntu</h4>
 <pre><tt>apt-get install build-essential libpcre2-dev rrdtool librrd-dev libssl-dev ldap-utils libldap2-dev fping</tt></pre>
+<p>The oldest releases with a suitable <tt>libpcre2-dev</tt> package are
+Ubuntu 16.04 (PCRE2 10.21) and Debian 9 (PCRE2 10.22).</p>
 
 <h4>RHEL-compatible distributions and Fedora</h4>
 <pre><tt>dnf install gcc make pcre2-devel rrdtool-devel openssl-devel openldap-devel fping</tt></pre>
-<p>Some releases provide RRDtool and fping through an additional repository such
-as EPEL.</p>
+<p>CentOS 7 and Amazon Linux 2 provide PCRE2 10.23 and RRDtool 1.4.8. When
+these systems define the Linux compatibility baseline, those are the practical
+package floors for a server build. RRDtool does not affect the client-only
+baseline. Some releases provide development packages, RRDtool, or fping through
+an additional repository such as EPEL.</p>
 
 <h4>FreeBSD</h4>
 <pre><tt>pkg install gmake pcre2 rrdtool openldap26-client fping apache24</tt></pre>
