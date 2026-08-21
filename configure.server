@@ -17,8 +17,8 @@ do
   To configure Xymon, the following options are available:
      --rrdinclude DIRECTORY   : Specify location of RRDtool include files
      --rrdlib DIRECTORY       : Specify location of RRDtool libraries
-	--pcreinclude DIRECTORY  : Specify location of PCRE2 include files
-	--pcrelib DIRECTORY      : Specify location of PCRE2 libraries
+     --pcreinclude DIRECTORY  : Specify location of PCRE2 include files
+     --pcrelib DIRECTORY      : Specify location of PCRE2 libraries
      --sslinclude DIRECTORY   : Specify location of OpenSSL include files
      --ssllib DIRECTORY       : Specify location of OpenSSL libraries
      --ldapinclude DIRECTORY  : Specify location of OpenLDAP include files
