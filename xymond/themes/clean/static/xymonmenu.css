@@ -24,10 +24,12 @@
 }
 
 .outer:hover {
-  height: auto;
+  overflow: visible;
   color: #171918;
   background: #fff3a6;
 }
+
+.outer:hover .menutag a { color: #171918; }
 
 a.inner,
 a.inner-1 {

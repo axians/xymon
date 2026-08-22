@@ -5,7 +5,8 @@
 
 body {
   color: #f4f1e8;
-  background: #171918;
+  background: #111513;
+  box-shadow: inset 0.4rem 0 var(--status-accent, #59635f);
   margin: 0;
   padding: 2.75rem 1rem 1rem;
 }
@@ -14,12 +15,12 @@ a:link { color: #65d6c4; }
 a:visited { color: #d8b4e2; }
 a:hover { color: #fff3a6; }
 
-.green { background-color: #174f3c; }
-.yellow { background-color: #725f16; }
-.red { background-color: #742d32; }
-.purple { background-color: #523466; }
-.blue { background-color: #27546d; }
-.clear { background-color: #414644; }
+body.green { --status-accent: #2bb673; }
+body.yellow { --status-accent: #e5b72f; }
+body.red { --status-accent: #df5a62; }
+body.purple { --status-accent: #a675c3; }
+body.blue { --status-accent: #4f9fc9; }
+body.clear { --status-accent: #7c8782; }
 
 table {
   border-collapse: collapse;
