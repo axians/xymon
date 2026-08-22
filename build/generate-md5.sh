@@ -8,13 +8,14 @@ export LC_ALL=C
 
 WEBLIST=$( (cd xymond && find webfiles -type f) | grep -Ev "RCS|\.svn" )
 WWWLIST=$( (cd xymond && find wwwfiles -type f) | grep -Ev "RCS|\.svn" )
+THEMELIST=$( (cd xymond && find themes -type f) | grep -Ev "RCS|\.svn" )
 
 # md5.dat must keep the hashes of every previously shipped version:
 # setup-newfiles only overwrites an installed file when its hash matches
 # one of these, so dropping old entries would break upgrade detection.
 {
 	cat build/md5.dat
-	for F in $WEBLIST $WWWLIST; do
+	for F in $WEBLIST $WWWLIST $THEMELIST; do
 		H=$(openssl dgst -md5 "xymond/$F" | awk '{print $2}')
 		if [ -z "$H" ]; then
 			echo "md5 digest failed for xymond/$F" >&2

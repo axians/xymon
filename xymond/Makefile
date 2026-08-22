@@ -5,7 +5,7 @@ XYMONCOMMLIBS = $(XYMONCOMMLIB) $(ZLIBLIBS) $(SSLLIBS) $(NETLIBS) $(LIBRTDEF)
 XYMONTIMELIB = ../lib/libxymontime.a
 XYMONTIMELIBS = $(XYMONTIMELIB) $(LIBRTDEF)
 
-PROGRAMS = xymon.sh xymond xymond_channel xymond_locator xymond_filestore xymond_history xymond_alert xymond_sample xymond_client xymond_hostdata xymond_capture xymond_distribute xymonfetch xymon-mailack trimhistory combostatus xymonreports.sh moverrd.sh convertnk rrdcachectl
+PROGRAMS = xymon.sh xymon-theme xymond xymond_channel xymond_locator xymond_filestore xymond_history xymond_alert xymond_sample xymond_client xymond_hostdata xymond_capture xymond_distribute xymonfetch xymon-mailack trimhistory combostatus xymonreports.sh moverrd.sh convertnk rrdcachectl
 CLIENTPROGRAMS = ../client/xymond_client
 
 ifeq ($(DORRD),yes)
@@ -124,6 +124,10 @@ xymon.sh: xymon.sh.DIST
 	cat $< | sed -e 's!@XYMONHOME@!$(XYMONHOME)!g' | sed -e 's!@XYMONLOGDIR@!$(XYMONLOGDIR)!g' | sed -e 's!@XYMONUSER@!$(XYMONUSER)!g' | sed -e 's!@RUNTIMEDEFS@!$(RUNTIMEDEFS)!g' >$@
 	chmod 755 $@
 
+xymon-theme: xymon-theme.DIST
+	sed -e 's!@INSTALLETCDIR@!$(INSTALLETCDIR)!g' $< >$@
+	chmod 755 $@
+
 xymonreports.sh: xymonreports.sh.DIST
 	cat $< | sed -e 's!@XYMONHOME@!$(XYMONHOME)!g' >$@
 	chmod 755 $@
@@ -156,7 +160,7 @@ clean:
 	rm -f etcfiles/xymon-apache.conf etcfiles/xymonserver.cfg etcfiles/hosts.cfg etcfiles/alerts.cfg etcfiles/tasks.cfg etcfiles/cgioptions.cfg etcfiles/analysis.cfg etcfiles/combo.cfg etcfiles/graphs.cfg etcfiles/client-local.cfg etcfiles/rrddefinitions.cfg
 	(find etcfiles/ -name "*~"; find wwwfiles/ -name "*~"; find webfiles/ -name "*~") | xargs rm -f
 
-install: install-bin install-man install-cfg
+install: install-bin install-man install-cfg install-themes
 
 install-bin:
 ifndef PKGBUILD
@@ -207,4 +211,19 @@ ifndef PKGBUILD
 	chown root $(INSTALLROOT)$(INSTALLBINDIR)/xymonping || echo "Could not make xymonping owned by root, continuing"
 	chmod 4755 $(INSTALLROOT)$(INSTALLBINDIR)/xymonping || echo "Could not make xymonping suid-root, continuing"
 endif
+
+install-themes:
+	for theme in themes/*; do \
+		test -d "$$theme" || continue; name=`basename "$$theme"`; \
+		mkdir -p $(INSTALLROOT)$(INSTALLETCDIR)/themes/$$name; \
+		(cd "$$theme"; printf '%s\n' theme.conf | ../../../build/setup-newfiles $(INSTALLROOT)$(INSTALLETCDIR)/themes/$$name/ ../../../build/md5.dat); \
+		if test -d "$$theme/static"; then \
+			mkdir -p $(INSTALLROOT)$(INSTALLSTATICWWWDIR)/menu/themes/$$name; \
+			(cd "$$theme/static"; find . | ../../../../build/setup-newfiles $(INSTALLROOT)$(INSTALLSTATICWWWDIR)/menu/themes/$$name/ ../../../../build/md5.dat); \
+		fi; \
+		if test -d "$$theme/templates"; then \
+			mkdir -p $(INSTALLROOT)$(INSTALLWEBDIR)/themes/$$name; \
+			(cd "$$theme/templates"; find . | ../../../../build/setup-newfiles $(INSTALLROOT)$(INSTALLWEBDIR)/themes/$$name/ ../../../../build/md5.dat); \
+		fi; \
+	done
 

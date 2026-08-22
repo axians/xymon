@@ -1,0 +1,56 @@
+.TH XYMON-THEME 1 "2026-08-22" "Version 4.3.30" "Xymon"
+.SH NAME
+xymon-theme \- select a Xymon web theme
+.SH SYNOPSIS
+.B "xymon-theme list"
+.br
+.B "xymon-theme current"
+.br
+.B "xymon-theme activate"
+.I THEME
+.br
+.B "xymon-theme disable"
+
+.SH DESCRIPTION
+\fBxymon-theme\fR selects an installed Xymon web theme without modifying
+xymonserver.cfg, xymonmenu.cfg, stock web assets, or stock templates.
+Activation writes the presentation settings from the selected package to
+xymonserver.d/90-theme.cfg using an atomic rename. The command manages only
+that drop-in and refuses to replace or remove it when it lacks the
+xymon-theme ownership marker.
+
+The built-in classic-blue theme is the default and uses Xymon's existing
+blue menu. No drop-in is needed for this default. The built-in classic-grey
+theme selects the existing grey menu. Disabling a selected theme removes the
+managed drop-in and returns to classic-blue.
+
+A theme package has a theme.conf manifest and may have static assets and
+templates. The manifest may set only XYMONSKIN, XYMONMENUSKIN,
+XYMONBODYCSS, XYMONBODYMENUCSS, XYMONBODYHEADER, XYMONBODYFOOTER, and
+XYMONLOGO. Monitoring and runtime settings are rejected.
+
+.SH COMMANDS
+.IP "\fBlist\fR"
+Print the identifiers of installed theme packages, one per line.
+.IP "\fBcurrent\fR"
+Print the active theme identifier. This prints "classic-blue" when no
+managed selection exists.
+.IP "\fBactivate\fR \fITHEME\fR"
+Validate and activate THEME. Theme identifiers begin with an ASCII letter
+or digit and contain only letters, digits, dots, underscores, and hyphens.
+.IP "\fBdisable\fR"
+Remove the managed selection and restore the default classic-blue theme.
+
+.SH FILES
+.IP "\fB$XYMONHOME/etc/themes/\fITHEME\fB/theme.conf\fR"
+Installed presentation settings for THEME.
+.IP "\fB$XYMONHOME/etc/xymonserver.d/90-theme.cfg\fR"
+The active selection generated and owned by xymon-theme.
+.IP "\fB$XYMONSERVERWWWURL/menu/themes/\fITHEME\fB/\fR"
+URL namespace for a theme's installed static assets.
+.IP "\fB$XYMONHOME/web/themes/\fITHEME\fB/\fR"
+Optional theme-specific templates. Packages use unique names here and do
+not replace stock templates.
+
+.SH "SEE ALSO"
+xymonserver.cfg(5)

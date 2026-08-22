@@ -1,0 +1,112 @@
+#!/bin/sh
+
+set -u
+
+program=${0##*/}
+etcdir=${XYMON_THEME_ETCDIR:-@INSTALLETCDIR@}
+themedir=${XYMON_THEME_DIR:-$etcdir/themes}
+dropindir=$etcdir/xymonserver.d
+active=$dropindir/90-theme.cfg
+marker="# Managed by xymon-theme"
+default_theme=classic-blue
+
+usage() {
+	printf 'Usage: %s {list|current|activate THEME|disable}\n' "$program" >&2
+	exit 2
+}
+
+fail() {
+	printf '%s: %s\n' "$program" "$*" >&2
+	exit 1
+}
+
+valid_theme_id() {
+	case $1 in
+		''|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+managed_active_file() {
+	[ -f "$active" ] && IFS= read -r first_line <"$active" && [ "$first_line" = "$marker" ]
+}
+
+validate_manifest() {
+	manifest=$1
+	while IFS= read -r line || [ -n "$line" ]; do
+		case $line in
+			''|'#'*) continue ;;
+		esac
+
+		name=${line%%=*}
+		[ "$name" != "$line" ] || fail "$manifest contains a malformed line: $line"
+		case $name in
+			XYMONSKIN|XYMONMENUSKIN|XYMONBODYCSS|XYMONBODYMENUCSS|XYMONBODYHEADER|XYMONBODYFOOTER|XYMONLOGO) ;;
+			*) fail "$manifest sets unsupported variable $name" ;;
+		esac
+	done <"$manifest"
+}
+
+list_themes() {
+	id=
+	[ -d "$themedir" ] || return 0
+	for manifest in "$themedir"/*/theme.conf; do
+		[ -f "$manifest" ] || continue
+		id=$(basename "$(dirname "$manifest")")
+		valid_theme_id "$id" && printf '%s\n' "$id"
+	done
+}
+
+current_theme() {
+	id=
+	if [ ! -e "$active" ]; then
+		printf '%s\n' "$default_theme"
+		return 0
+	fi
+	managed_active_file || fail "$active is not managed by $program"
+	id=$(sed -n '2s/^# Theme: //p' "$active")
+	valid_theme_id "$id" || fail "$active does not identify a valid theme"
+	printf '%s\n' "$id"
+}
+
+activate_theme() {
+	id=$1
+	valid_theme_id "$id" || fail "invalid theme ID: $id"
+	manifest=$themedir/$id/theme.conf
+	[ -f "$manifest" ] || fail "theme not found: $id"
+	validate_manifest "$manifest"
+
+	if [ -e "$active" ] && ! managed_active_file; then
+		fail "refusing to replace unmanaged $active"
+	fi
+
+	mkdir -p "$dropindir" || fail "cannot create $dropindir"
+	tmp=$dropindir/.90-theme.cfg.$$
+	trap 'rm -f "$tmp"' 0 HUP INT TERM
+	{
+		printf '%s\n' "$marker"
+		printf '# Theme: %s\n' "$id"
+		cat "$manifest"
+	} >"$tmp" || fail "cannot write $tmp"
+	chmod 644 "$tmp" || fail "cannot set permissions on $tmp"
+	mv -f "$tmp" "$active" || fail "cannot activate $id"
+	trap - 0 HUP INT TERM
+	printf '%s\n' "$id"
+}
+
+disable_theme() {
+	[ -e "$active" ] || return 0
+	managed_active_file || fail "refusing to remove unmanaged $active"
+	rm -f "$active" || fail "cannot remove $active"
+}
+
+[ $# -ge 1 ] || usage
+command=$1
+shift
+case $command in
+	list) [ $# -eq 0 ] || usage; list_themes ;;
+	current) [ $# -eq 0 ] || usage; current_theme ;;
+	activate) [ $# -eq 1 ] || usage; activate_theme "$1" ;;
+	disable) [ $# -eq 0 ] || usage; disable_theme ;;
+	*) usage ;;
+esac

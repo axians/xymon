@@ -1,0 +1,17 @@
+Xymon theme packages
+====================
+
+Each immediate subdirectory is one theme package:
+
+  theme-id/theme.conf       Presentation variables activated by xymon-theme
+  theme-id/static/          Files published below menu/themes/theme-id
+  theme-id/templates/       Optional files installed below web/themes/theme-id
+
+classic-blue is the default theme and uses Xymon's existing blue menu.
+classic-grey selects the existing grey menu. The default needs no generated
+drop-in; disabling an active theme returns to classic-blue.
+
+Theme identifiers must begin with an ASCII letter or digit and may contain
+only letters, digits, dots, underscores, and hyphens. A manifest may set only
+the presentation variables accepted by xymon-theme. Theme packages must use
+unique paths and must not replace stock configuration, assets, or templates.
