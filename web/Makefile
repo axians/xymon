@@ -5,8 +5,8 @@ XYMONCOMMLIBS = $(XYMONCOMMLIB) $(SSLLIBS) $(NETLIBS) $(LIBRTDEF)
 XYMONTIMELIB = ../lib/libxymontime.a
 XYMONTIMELIBS = $(XYMONTIMELIB) $(LIBRTDEF)
 
-PROGRAMS = history.cgi eventlog.cgi report.cgi reportlog.cgi snapshot.cgi findhost.cgi csvinfo.cgi acknowledge.cgi xymonpage datepage.cgi svcstatus.cgi enadis.cgi confreport.cgi criticalview.cgi criticaleditor.cgi ackinfo.cgi statusreport.cgi boilerplate.cgi hostgraphs.cgi ghostlist.cgi notifications.cgi acknowledgements.cgi hostlist.cgi useradm.cgi chpasswd.cgi appfeed.cgi cgiwrap
-CGISCRIPTS = history.sh eventlog.sh report.sh reportlog.sh snapshot.sh findhost.sh csvinfo.sh columndoc.sh datepage.sh svcstatus.sh historylog.sh confreport.sh confreport-critical.sh criticalview.sh certreport.sh nongreen.sh hostgraphs.sh ghostlist.sh notifications.sh acknowledgements.sh hostlist.sh topchanges.sh appfeed.sh appfeed-critical.sh
+PROGRAMS = history.cgi eventlog.cgi report.cgi reportlog.cgi snapshot.cgi findhost.cgi csvinfo.cgi acknowledge.cgi xymonpage datepage.cgi svcstatus.cgi enadis.cgi confreport.cgi criticalview.cgi criticaleditor.cgi ackinfo.cgi statusreport.cgi boilerplate.cgi hostgraphs.cgi ghostlist.cgi notifications.cgi acknowledgements.cgi hostlist.cgi useradm.cgi chpasswd.cgi appfeed.cgi xymonlive.cgi cgiwrap
+CGISCRIPTS = history.sh eventlog.sh report.sh reportlog.sh snapshot.sh findhost.sh csvinfo.sh columndoc.sh datepage.sh svcstatus.sh historylog.sh confreport.sh confreport-critical.sh criticalview.sh certreport.sh nongreen.sh hostgraphs.sh ghostlist.sh notifications.sh acknowledgements.sh hostlist.sh topchanges.sh appfeed.sh appfeed-critical.sh xymonlive.sh
 SECCGISCRIPTS = acknowledge.sh enadis.sh criticaleditor.sh ackinfo.sh useradm.sh chpasswd.sh
 
 ifeq ($(DORRD),yes)
@@ -26,6 +26,7 @@ ACKCGIOBJS      = acknowledge.o
 WEBPAGEOBJS     = xymonpage.o
 DATEPAGEOBJS    = datepage.o
 APPFEEDOBJS	= appfeed.o
+XYMONLIVEOBJS	= xymonlive.o
 
 SHOWGRAPHOBJS   = showgraph.o
 SVCSTATUSOBJS   = svcstatus.o svcstatus-info.o svcstatus-trends.o
@@ -153,6 +154,9 @@ chpasswd.cgi: $(CHPASSWDOBJS) $(XYMONCOMMLIB)
 
 appfeed.cgi: $(APPFEEDOBJS) $(XYMONLIB)
 	$(CC) $(CFLAGS) -o $@ $(RPATHOPT) $(APPFEEDOBJS) $(XYMONCOMMLIBS) $(XYMONLIBS) $(PCRELIBS)
+
+xymonlive.cgi: $(XYMONLIVEOBJS) $(XYMONLIB)
+	$(CC) $(CFLAGS) -o $@ $(RPATHOPT) $(XYMONLIVEOBJS) $(XYMONCOMMLIBS) $(XYMONLIBS) $(PCRELIBS)
 
 
 %.o: %.c
