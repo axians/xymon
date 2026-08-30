@@ -1,0 +1,45 @@
+.TH XYMONLIVE.CGI 1 "Version 4.3.31" "Xymon"
+.SH NAME
+xymonlive.cgi \- live browser view of Xymon status changes
+.SH SYNOPSIS
+.B "xymonlive.cgi [options]"
+.SH DESCRIPTION
+.B xymonlive.cgi
+serves an HTML5 dashboard that receives actual status transitions from
+.BR xymond_websocket (8).
+It does not poll the current status board and does not read history or
+allevents files. The dashboard displays only recent changes.
+.PP
+The gateway keeps a bounded transition ring in memory. A newly connected or
+reconnected browser receives that ring and then receives new transitions as
+they happen. The browser deduplicates replayed entries by gateway generation
+and sequence number.
+.PP
+The ring is not a durable history. It starts empty when the gateway restarts;
+browsers detect the new generation and discard entries from the previous
+process. No checkpoint is read or written.
+.PP
+The client can filter events by host, service, or message text and by event
+type: status transition, disable comment, or acknowledgement comment. It keeps
+up to 500 events in memory and can render 25, 50, 100, 250, or all 500 rows.
+Status-message text can be hidden without removing it from client-side
+filtering.
+.PP
+The webserver must proxy
+.B $XYMONSERVERCGIURL/xymonlive-ws
+to the loopback gateway. The generated Apache configuration includes guarded
+proxy directives; enable the Apache proxy and proxy_wstunnel modules to use
+them.
+.PP
+An upgrade preserves an existing locally managed xymon-apache.conf. Merge the
+Xymon Live ProxyPass directives from the generated configuration into that
+file when upgrading an existing installation.
+.SH OPTIONS
+.IP "\fB\-\-env=FILENAME\fR"
+Load the Xymon environment from FILENAME.
+.IP "\fB\-\-area=NAME\fR"
+Load environment settings for the named area.
+.IP "\fB\-\-debug\fR"
+Enable debugging output.
+.SH SEE ALSO
+xymon(1), xymond(8), xymond_channel(8), xymond_websocket(8)

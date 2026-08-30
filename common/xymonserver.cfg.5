@@ -312,7 +312,9 @@ the sample Apache configuration in ~/server/etc/xymon\-apache.conf.
 
 .IP "\fBXYMONWEBHOST\fR"
 Initial part of the Xymon URL, including just the protocol and the
-hostname, e.g. "http://www.foo.com"
+hostname, e.g. "http://www.foo.com". The packaged Xymon Live WebSocket
+task also uses this complete origin to validate browser connections, so set
+the scheme and any non-default port to the externally visible values.
 
 .IP "\fBXYMONWEBHOSTURL\fR"
 Prefix for all of the static Xymon webpages, e.g. "http://www.foo.com/xymon"
@@ -410,6 +412,12 @@ The portnumber for used to contact the
 .I xymond(8)
 service. Used by clients and the tools that perform network tests.
 Default: 1984.
+
+.IP "\fBXYMONLIVEWEBSOCKETPORT\fR"
+The loopback TCP port where
+.I xymond_websocket(8)
+accepts proxied WebSocket connections for Xymon Live.
+Default: 1985.
 
 .IP "\fBMAXMSGSPERCOMBO\fR"
 The maximum number of status messages to combine into one

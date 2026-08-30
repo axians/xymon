@@ -1,0 +1,56 @@
+.TH XYMOND_WEBSOCKET 8 "Version 4.3.31" "Xymon"
+.SH NAME
+xymond_websocket \- broadcast Xymon status changes to WebSocket clients
+.SH SYNOPSIS
+.B "xymond_channel --channel=stachg xymond_websocket --origin=ORIGIN [options]"
+.SH DESCRIPTION
+.B xymond_websocket
+is a worker for the xymond status-change channel. It listens on a loopback TCP
+socket, accepts same-origin WebSocket upgrades, and broadcasts each actual
+status transition as JSON.
+.PP
+The worker retains the latest 500 transitions in memory. It sends a generation
+identifier followed by the retained transitions to each new connection. The
+ring and generation are process-local: restarting the worker starts with an
+empty ring and does not read or write a checkpoint.
+.PP
+The listener should not be exposed directly. A webserver terminates HTTP or
+HTTPS and proxies the Xymon Live WebSocket path to the loopback listener. The
+worker rejects browser upgrades unless both the complete Origin and Host match
+the configured browser-facing origin. The packaged task passes XYMONWEBHOST.
+.PP
+Xymon does not overwrite an existing locally managed xymon-apache.conf during
+upgrade. Existing installations must merge the generated Xymon Live ProxyPass
+directives into their active webserver configuration.
+.SH OPTIONS
+.IP "\fB\-\-origin=ORIGIN\fR"
+Require this browser origin, including its http or https scheme and optional
+port. This option is mandatory. Do not include a path; a trailing slash is
+accepted in the configured value.
+.IP "\fB\-\-listen=ADDRESS\fR"
+Listen on this IPv4 address. The default is 127.0.0.1.
+.IP "\fB\-\-port=PORT\fR"
+Listen on this TCP port. The default is 1985. The packaged task uses
+XYMONLIVEWEBSOCKETPORT from xymonserver.cfg.
+.IP "\fB\-\-debug\fR"
+Enable debugging output.
+.SH PROTOCOL
+The gateway accepts WebSocket version 13 at the path
+.BR /xymonlive .
+After the upgrade it sends a hello object containing the process generation,
+then zero or more change objects from the in-memory ring. New change objects
+are sent as transitions arrive. Each change includes the host, test, old and
+new colors, transition time, sequence number, and up to 511 bytes from the
+first human-readable line of the status message body. Disable and
+acknowledgement actions are sent as distinct event types carrying their
+comments. Idle connections receive WebSocket ping frames.
+The gateway also sends heartbeat JSON objects so browsers can detect a stalled
+connection even when the TCP socket remains open.
+If its xymond status-change channel disappears, the gateway sends an explicit
+xymond-unavailable object before closing browser connections.
+Xymond also publishes a heartbeat marker every 30 seconds. If the gateway sees
+no channel activity for 65 seconds, it reports xymond unavailable while keeping
+the browser connection alive, and reports live again when channel activity
+resumes.
+.SH SEE ALSO
+xymonlive.cgi(1), xymond(8), xymond_channel(8)

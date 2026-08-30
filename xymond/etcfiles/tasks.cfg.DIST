@@ -30,6 +30,13 @@
 	NEEDS xymond
 	CMD xymond_channel --channel=stachg --log=$XYMONSERVERLOGS/history.log xymond_history --pidfile=$XYMONSERVERLOGS/xymond_history.pid
 
+# Xymon Live keeps recent transitions in memory and broadcasts them to
+# same-origin WebSocket clients through the webserver proxy.
+[xymonlive-websocket]
+	ENVFILE @XYMONHOME@/etc/xymonserver.cfg
+	NEEDS xymond
+	CMD xymond_channel --channel=stachg --log=$XYMONSERVERLOGS/xymonlive-websocket.log xymond_websocket --listen=127.0.0.1 --port=$XYMONLIVEWEBSOCKETPORT --origin=$XYMONWEBHOST
+
 # "alert" sends out alerts.
 [alert]
 	ENVFILE @XYMONHOME@/etc/xymonserver.cfg

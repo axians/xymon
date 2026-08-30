@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link rel="stylesheet" href="../mandoc.css" type="text/css" media="all"/>
+  <title>XYMOND_WEBSOCKET(8)</title>
+</head>
+<body>
+<h1 class="head-name">XYMOND_WEBSOCKET</h1>
+Section: Maintenance Commands (8)<br/>Updated: Version 4.3.31<br/><a href="#INDEX">Index</a>
+<a href="../index.html">Return to Main Contents</a><hr/>
+
+<div class="manual-text">
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="NAME"><a class="permalink" href="#NAME">NAME</a></h1>
+<p class="Pp">xymond_websocket - broadcast Xymon status changes to WebSocket
+    clients</p>
+</section>
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="SYNOPSIS"><a class="permalink" href="#SYNOPSIS">SYNOPSIS</a></h1>
+<p class="Pp"><b>xymond_channel --channel=stachg xymond_websocket
+    --origin=ORIGIN [options]</b></p>
+</section>
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="DESCRIPTION"><a class="permalink" href="#DESCRIPTION">DESCRIPTION</a></h1>
+<p class="Pp"><b>xymond_websocket</b> is a worker for the xymond status-change
+    channel. It listens on a loopback TCP socket, accepts same-origin WebSocket
+    upgrades, and broadcasts each actual status transition as JSON.</p>
+<p class="Pp">The worker retains the latest 500 transitions in memory. It sends
+    a generation identifier followed by the retained transitions to each new
+    connection. The ring and generation are process-local: restarting the worker
+    starts with an empty ring and does not read or write a checkpoint.</p>
+<p class="Pp">The listener should not be exposed directly. A webserver
+    terminates HTTP or HTTPS and proxies the Xymon Live WebSocket path to the
+    loopback listener. The worker rejects browser upgrades unless both the
+    complete Origin and Host match the configured browser-facing origin. The
+    packaged task passes XYMONWEBHOST.</p>
+<p class="Pp">Xymon does not overwrite an existing locally managed
+    xymon-apache.conf during upgrade. Existing installations must merge the
+    generated Xymon Live ProxyPass directives into their active webserver
+    configuration.</p>
+</section>
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="OPTIONS"><a class="permalink" href="#OPTIONS">OPTIONS</a></h1>
+<dl class="Bl-tag">
+  <dt id="origin"><a class="permalink" href="#origin"><b>--origin=ORIGIN</b></a></dt>
+  <dd>Require this browser origin, including its http or https scheme and
+      optional port. This option is mandatory. Do not include a path; a trailing
+      slash is accepted in the configured value.</dd>
+  <dt id="listen"><a class="permalink" href="#listen"><b>--listen=ADDRESS</b></a></dt>
+  <dd>Listen on this IPv4 address. The default is 127.0.0.1.</dd>
+  <dt id="port"><a class="permalink" href="#port"><b>--port=PORT</b></a></dt>
+  <dd>Listen on this TCP port. The default is 1985. The packaged task uses
+      XYMONLIVEWEBSOCKETPORT from xymonserver.cfg.</dd>
+  <dt id="debug"><a class="permalink" href="#debug"><b>--debug</b></a></dt>
+  <dd>Enable debugging output.</dd>
+</dl>
+</section>
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="PROTOCOL"><a class="permalink" href="#PROTOCOL">PROTOCOL</a></h1>
+<p class="Pp">The gateway accepts WebSocket version 13 at the path
+    <b>/xymonlive</b>. After the upgrade it sends a hello object containing the
+    process generation, then zero or more change objects from the in-memory
+    ring. New change objects are sent as transitions arrive. Each change
+    includes the host, test, old and new colors, transition time, sequence
+    number, and up to 511 bytes from the first human-readable line of the status
+    message body. Disable and acknowledgement actions are sent as distinct event
+    types carrying their comments. Idle connections receive WebSocket ping
+    frames. The gateway also sends heartbeat JSON objects so browsers can detect
+    a stalled connection even when the TCP socket remains open. If its xymond
+    status-change channel disappears, the gateway sends an explicit
+    xymond-unavailable object before closing browser connections. Xymond also
+    publishes a heartbeat marker every 30 seconds. If the gateway sees no
+    channel activity for 65 seconds, it reports xymond unavailable while keeping
+    the browser connection alive, and reports live again when channel activity
+    resumes.</p>
+</section>
+<section class="Sh">
+<p>&#160;</p>
+<h1 class="Sh" id="SEE_ALSO"><a class="permalink" href="#SEE_ALSO">SEE
+  ALSO</a></h1>
+<p class="Pp"><a href="../man1/xymonlive.cgi.1.html">xymonlive.cgi</a>(1), <a href="../man8/xymond.8.html">xymond</a>(8), <a href="../man8/xymond_channel.8.html">xymond_channel</a>(8)</p>
+</section>
+<p>&#160;</p>
+<h1 class="Sh" id="INDEX"><a class="permalink" href="#INDEX">Index</a></h1>
+<dl class="Bl-tag">
+<dt><a href="#NAME">NAME</a></dt>
+<dt><a href="#SYNOPSIS">SYNOPSIS</a></dt>
+<dt><a href="#DESCRIPTION">DESCRIPTION</a></dt>
+<dt><a href="#OPTIONS">OPTIONS</a></dt>
+<dt><a href="#PROTOCOL">PROTOCOL</a></dt>
+<dt><a href="#SEE_ALSO">SEE ALSO</a></dt>
+</dl>
+</div>
+<hr/>
+This document was created by mandoc, using the manual pages.
+
+</body>
+</html>
