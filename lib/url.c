@@ -394,13 +394,21 @@ void parse_url(char *inputurl, urlelem_t *url)
 	url->relurl = malloc(strlen(startp) + 2);
 	snprintf(url->relurl, (strlen(startp)+2), "/%s", startp);
 
-	if (url->auth == NULL) {
-		/* See if we have it in the .netrc list */
+	if ((url->auth == NULL) || (strncmp(url->auth, "CERT:", 5) == 0)) {
+		/*
+		 * See if we have it in the .netrc list. If there's no inline auth at
+		 * all, this becomes the request's Basic Auth (unchanged behavior).
+		 * If the inline auth is a client-cert reference, stash it separately
+		 * so both the cert and the netrc credentials can be used together.
+		 */
 		loginlist_t *walk;
 
 		load_netrc();
 		for (walk = loginhead; (walk && (strcmp(walk->host, url->host) != 0)); walk = walk->next) ;
-		if (walk) url->auth = strdup(walk->auth);
+		if (walk) {
+			if (url->auth == NULL) url->auth = strdup(walk->auth);
+			else url->netrcauth = strdup(walk->auth);
+		}
 	}
 
 	/* Build the canonical form of this URL, free from all config artefacts */

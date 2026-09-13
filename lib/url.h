@@ -36,6 +36,7 @@ typedef struct urlelem_t {
 	char *ip;
 	int  port;
 	char *auth;
+	char *netrcauth;	/* netrc-resolved "user:pass", used alongside a CERT: auth */
 	char *relurl;
 	int parseerror;
 } urlelem_t;

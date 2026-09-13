@@ -620,6 +620,11 @@ void add_http_test(testitem_t *t)
 			addtobuffer(httprequest, "\r\n");
 		}
 	}
+	if (httptest->weburl.desturl->netrcauth) {
+		addtobuffer(httprequest, "Authorization: Basic ");
+		addtobuffer(httprequest, base64encode(httptest->weburl.desturl->netrcauth));
+		addtobuffer(httprequest, "\r\n");
+	}
 	if (httptest->weburl.proxyurl && httptest->weburl.proxyurl->auth) {
 		addtobuffer(httprequest, "Proxy-Authorization: Basic ");
 		addtobuffer(httprequest, base64encode(httptest->weburl.proxyurl->auth));
